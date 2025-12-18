@@ -1,0 +1,52 @@
+# Example Terraform Variables for Banking Platform
+# Copy this file to terraform.tfvars and customize the values
+
+# Basic Configuration
+project_name = "banking-platform"
+environment  = "dev"  # dev, staging, prod
+location     = "East US"
+
+# AKS Configuration
+kubernetes_version = "1.28.3"
+aks_node_count    = 3
+aks_node_size     = "Standard_D4s_v3"
+
+# Auto-scaling Configuration
+enable_auto_scaling = true
+min_node_count     = 2
+max_node_count     = 10
+
+# Security Configuration
+enable_private_cluster = false  # Set to true for production
+enable_azure_policy   = true
+
+# Database Configuration
+sql_admin_username = "bankingadmin"
+sql_sku_name      = "S2"
+sql_max_size_gb   = 250
+
+# Service Bus Configuration
+service_bus_sku = "Standard"
+
+# Redis Configuration
+redis_sku_name = "Standard"
+redis_family   = "C"
+redis_capacity = 1
+
+# Container Registry Configuration
+acr_sku = "Standard"
+
+# Backup Configuration
+enable_backup          = true
+backup_retention_days = 30
+
+# Monitoring Configuration
+enable_monitoring = true
+
+# Additional Tags
+tags = {
+  "CostCenter"   = "Engineering"
+  "Owner"        = "Platform Team"
+  "Environment"  = "Development"
+  "Application"  = "Banking Platform"
+}

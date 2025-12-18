@@ -1,0 +1,185 @@
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: banking-platform-metrics
+  namespace: banking-platform
+spec:
+  metrics:
+  - providers:
+    - name: prometheus
+  - overrides:
+    - match:
+        metric: ALL_METRICS
+      tagOverrides:
+        request_protocol:
+          value: "http"
+    - match:
+        metric: REQUEST_COUNT
+      disabled: false
+    - match:
+        metric: REQUEST_DURATION
+      disabled: false
+    - match:
+        metric: REQUEST_SIZE
+      disabled: false
+    - match:
+        metric: RESPONSE_SIZE
+      disabled: false
+    - match:
+        metric: TCP_OPENED_CONNECTIONS
+      disabled: false
+    - match:
+        metric: TCP_CLOSED_CONNECTIONS
+      disabled: false
+---
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: banking-platform-tracing
+  namespace: banking-platform
+spec:
+  tracing:
+  - providers:
+    - name: jaeger
+  - customTags:
+      banking_operation:
+        header:
+          name: "x-banking-operation"
+      customer_id:
+        header:
+          name: "x-customer-id"
+      transaction_id:
+        header:
+          name: "x-transaction-id"
+      correlation_id:
+        header:
+          name: "x-correlation-id"
+---
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: banking-platform-access-logs
+  namespace: banking-platform
+spec:
+  accessLogging:
+  - providers:
+    - name: otel
+  - format: |
+      {
+        "timestamp": "%START_TIME%",
+        "method": "%REQ(:METHOD)%",
+        "path": "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%",
+        "protocol": "%PROTOCOL%",
+        "response_code": "%RESPONSE_CODE%",
+        "response_flags": "%RESPONSE_FLAGS%",
+        "bytes_received": "%BYTES_RECEIVED%",
+        "bytes_sent": "%BYTES_SENT%",
+        "duration": "%DURATION%",
+        "x_forwarded_for": "%REQ(X-FORWARDED-FOR)%",
+        "user_agent": "%REQ(USER-AGENT)%",
+        "request_id": "%REQ(X-REQUEST-ID)%",
+        "authority": "%REQ(:AUTHORITY)%",
+        "upstream_host": "%UPSTREAM_HOST%",
+        "upstream_service_time": "%RESP(X-ENVOY-UPSTREAM-SERVICE-TIME)%",
+        "customer_id": "%REQ(X-CUSTOMER-ID)%",
+        "banking_operation": "%REQ(X-BANKING-OPERATION)%",
+        "correlation_id": "%REQ(X-CORRELATION-ID)%"
+      }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: banking-platform-istio-telemetry-config
+  namespace: istio-system
+data:
+  mesh: |
+    defaultConfig:
+      tracing:
+        sampling: 1.0
+        max_path_tag_length: 256
+        custom_tags:
+          banking_service:
+            environment:
+              name: BANKING_SERVICE_NAME
+          banking_version:
+            environment:
+              name: BANKING_SERVICE_VERSION
+          customer_context:
+            header:
+              name: x-customer-context
+      proxyStatsMatcher:
+        inclusionRegexps:
+        - ".*circuit_breakers.*"
+        - ".*upstream_rq_retry.*"
+        - ".*upstream_rq_pending.*"
+        - ".*_cx_.*"
+        - ".*banking_.*"
+        exclusionRegexps:
+        - ".*osconfig.*"
+---
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  name: banking-platform-istio-config
+  namespace: istio-system
+spec:
+  values:
+    telemetry:
+      v2:
+        prometheus:
+          configOverride:
+            metric_relabeling_configs:
+            - source_labels: [__name__]
+              regex: 'istio_request_total'
+              target_label: __name__
+              replacement: 'banking_requests_total'
+            - source_labels: [__name__]
+              regex: 'istio_request_duration_milliseconds'
+              target_label: __name__
+              replacement: 'banking_request_duration_ms'
+        stackdriver:
+          configOverride:
+            enable_logging: true
+            enable_metrics: true
+            enable_tracing: true
+    pilot:
+      env:
+        EXTERNAL_ISTIOD: false
+        PILOT_ENABLE_WORKLOAD_ENTRY_AUTOREGISTRATION: true
+        PILOT_TRACE_SAMPLING: 1.0
+        PILOT_ENABLE_DESTINATION_RULE_INHERITANCE: true
+    proxy:
+      tracer: "jaeger"
+    meshConfig:
+      accessLogFile: /dev/stdout
+      defaultConfig:
+        tracing:
+          sampling: 1.0
+          max_path_tag_length: 256
+          custom_tags:
+            banking_operation:
+              header:
+                name: x-banking-operation
+            customer_id:
+              header:
+                name: x-customer-id
+            transaction_type:
+              header:
+                name: x-transaction-type
+        proxyMetadata:
+          ISTIO_META_DNS_CAPTURE: "true"
+          ISTIO_META_DNS_AUTO_ALLOCATE: "true"
+        holdApplicationUntilProxyStarts: true
+      extensionProviders:
+      - name: jaeger
+        envoyOtelAls:
+          service: jaeger.istio-system.svc.cluster.local
+          port: 14250
+      - name: prometheus
+        prometheus:
+          configOverride:
+            metric_relabeling_configs:
+            - source_labels: [__name__]
+              regex: 'istio_(.*)'
+              target_label: __name__
+              replacement: 'banking_${1}'

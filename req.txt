@@ -1,0 +1,212 @@
+You are a Principal Enterprise Architect, Cloud Architect, and Senior Engineer.
+
+Your task is to generate a COMPLETE, REAL, WORKING,
+CLOUD-NATIVE BANKING PLATFORM
+built on AZURE using MICROSERVICES.
+
+This is NOT a tutorial.
+This is a REAL ENTERPRISE-GRADE PROJECT
+that can be pushed to GitHub and shown to recruiters and architects.
+
+==================================================
+PROJECT GOAL
+==================================================
+
+Build a FULL-FLEDGED BANKING SYSTEM similar to:
+- ICICI Bank
+- HDFC Bank
+- Citi Bank
+
+The system must demonstrate:
+- Scalability
+- Resiliency
+- Security
+- Observability
+- Correctness (no duplicate transactions)
+
+==================================================
+ROOT GITHUB REPOSITORY (MUST CREATE)
+==================================================
+
+cloud-native-banking-platform-azure
+
+==================================================
+VERY IMPORTANT STRUCTURE RULE
+==================================================
+
+The repository MUST contain:
+
+A) THEORY & ARCHITECTURE (docs/)
+B) FULL SOURCE CODE (frontend + backend)
+C) INFRA & DEPLOYMENT (AKS, Helm, Istio)
+D) OPERATIONS & RUNBOOKS
+
+Theory MUST explain WHY.
+Code MUST prove HOW.
+Docs MUST reference exact code paths.
+
+==================================================
+REPOSITORY STRUCTURE (MANDATORY)
+==================================================
+
+cloud-native-banking-platform-azure/
+│
+├── docs/
+│   ├── 01_business_context/
+│   ├── 02_architecture/
+│   ├── 03_design_decisions/
+│   ├── 04_scalability_and_resilience/
+│   ├── 05_observability/
+│   ├── 06_failure_and_duplicates/
+│   ├── 07_operations_runbooks/
+│   └── 08_interview_walkthrough/
+│
+├── frontend/
+│   └── banking-ui/
+│
+├── backend/
+│   ├── Banking.sln
+│   ├── AccountService/
+│   ├── TransactionService/
+│   ├── PaymentService/
+│   └── NotificationService/
+│
+├── docker/
+├── helm/
+├── istio/
+├── observability/
+│   ├── efk/
+│   ├── prometheus/
+│   └── grafana/
+│
+├── terraform/
+└── pipelines/
+
+==================================================
+SYSTEM FUNCTIONALITY (MANDATORY)
+==================================================
+
+Banking use cases:
+- Create account
+- Check balance
+- Transfer money
+- Make payment
+- Transaction history
+
+Frontend:
+- Simple UI to initiate banking operations
+- Calls backend APIs
+
+Backend (.NET Core microservices):
+1) AccountService
+   - Manages accounts
+   - Azure SQL
+2) TransactionService
+   - Records transactions
+   - Azure SQL
+   - Publishes events
+3) PaymentService
+   - Processes payments
+   - Handles idempotency & duplicates
+4) NotificationService
+   - Async consumer
+   - Sends notifications
+
+==================================================
+COMMUNICATION
+==================================================
+
+- Sync: REST + gRPC
+- Async: Azure Service Bus
+- DB per service (Azure SQL)
+
+==================================================
+OBSERVABILITY (MANDATORY)
+==================================================
+
+Implement:
+- Structured JSON logs
+- Correlation IDs
+- Fluent Bit → Elasticsearch → Kibana
+- Prometheus metrics
+- Grafana dashboards
+- Istio / Envoy telemetry
+
+==================================================
+DEPLOYMENT & PLATFORM
+==================================================
+
+- Docker per service
+- Azure Container Registry
+- AKS
+- Helm charts per service
+- Istio service mesh
+- Blue-Green & Canary deployments
+
+==================================================
+DUPLICATE & CONSISTENCY HANDLING (CRITICAL)
+==================================================
+
+Implement:
+- Idempotency keys at API layer
+- Service Bus duplicate detection
+- Database unique constraints
+- Exactly-once illusion handling
+
+==================================================
+DOCUMENTATION REQUIREMENTS (docs/)
+==================================================
+
+Each doc must explain:
+- WHY this component exists
+- WHY this pattern was chosen
+- WHY alternatives were rejected
+- HOW this behaves under load/failure
+- HOW banks handle this in real life
+
+Include:
+- Architecture diagrams (ASCII)
+- Request flow diagrams
+- Sequence diagrams
+- Failure scenarios
+
+==================================================
+OPERATIONS & RUNBOOKS
+==================================================
+
+Include:
+- How to monitor after go-live
+- How to trace a failed transaction
+- How to debug duplicate payments
+- How to rollback safely
+- How to scale during peak hours
+
+==================================================
+INTERVIEW PREPARATION
+==================================================
+
+Provide:
+- 2-minute architecture explanation
+- Common LTI Round-2 questions
+- Trap questions & strong answers
+- How to walk interviewer through GitHub repo
+
+==================================================
+FINAL EXPECTATION
+==================================================
+
+This project must allow someone to:
+- Clone repo
+- Run services locally
+- Deploy to AKS
+- Observe logs & metrics
+- Simulate failures
+- Explain architecture confidently
+
+DO NOT:
+- Skip code
+- Put everything only in markdown
+- Oversimplify like a demo
+
+BEGIN WITH:
+docs/01_business_context/Banking_Domain_Overview.md

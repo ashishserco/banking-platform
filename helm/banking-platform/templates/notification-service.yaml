@@ -1,0 +1,112 @@
+{{- if .Values.services.notificationService.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "banking-platform.fullname" . }}-notification-service
+  labels:
+    {{- include "banking-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: notification-service
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "banking-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: notification-service
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+      labels:
+        {{- include "banking-platform.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: notification-service
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "banking-platform.serviceAccountName" . }}
+      {{- include "banking-platform.podSecurityContext" . | nindent 6 }}
+      containers:
+        - name: notification-service
+          {{- include "banking-platform.securityContext" . | nindent 10 }}
+          image: {{ include "banking-platform.image" (dict "repository" .Values.image.repository.notificationService "Values" .Values) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          env:
+            {{- include "banking-platform.commonEnvVars" . | nindent 12 }}
+            - name: ConnectionStrings__DefaultConnection
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "banking-platform.fullname" . }}-database
+                  key: notifications-connection-string
+            - name: Notification__Email__ApiKey
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "banking-platform.fullname" . }}-external-services
+                  key: sendgrid-api-key
+            - name: Notification__Email__FromEmail
+              value: {{ .Values.config.services.sendGrid.fromEmail | quote }}
+            - name: Notification__Email__FromName
+              value: {{ .Values.config.services.sendGrid.fromName | quote }}
+            - name: Notification__Sms__AccountSid
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "banking-platform.fullname" . }}-external-services
+                  key: twilio-account-sid
+            - name: Notification__Sms__AuthToken
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "banking-platform.fullname" . }}-external-services
+                  key: twilio-auth-token
+            - name: Notification__Sms__FromNumber
+              value: {{ .Values.config.services.twilio.fromNumber | quote }}
+            - name: Notification__Push__ServerKey
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "banking-platform.fullname" . }}-external-services
+                  key: firebase-server-key
+          {{- include "banking-platform.healthChecks" . | nindent 10 }}
+          {{- include "banking-platform.resources" (dict "resources" .Values.resources.notificationService) | nindent 10 }}
+          volumeMounts:
+            - name: logs
+              mountPath: /app/logs
+      volumes:
+        - name: logs
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "banking-platform.fullname" . }}-notification-service
+  labels:
+    {{- include "banking-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: notification-service
+spec:
+  type: {{ .Values.services.notificationService.type }}
+  ports:
+    - port: {{ .Values.services.notificationService.port }}
+      targetPort: {{ .Values.services.notificationService.targetPort }}
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "banking-platform.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: notification-service
+{{- end }}

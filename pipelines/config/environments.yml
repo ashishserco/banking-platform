@@ -1,0 +1,145 @@
+# Environment Configuration for CI/CD Pipelines
+# Defines environment-specific settings for deployments
+
+environments:
+  development:
+    name: "development"
+    kubernetes:
+      namespace: "banking-platform-dev"
+      cluster: "banking-platform-dev-aks"
+      resource_group: "banking-platform-dev-rg"
+    database:
+      server: "banking-platform-dev-sql.database.windows.net"
+      backup_retention: 7
+    monitoring:
+      retention_days: 7
+      alert_severity: "warning"
+    scaling:
+      min_replicas: 1
+      max_replicas: 3
+      cpu_threshold: 80
+    features:
+      debug_enabled: true
+      detailed_logging: true
+      swagger_enabled: true
+    security:
+      private_endpoints: false
+      network_policies: false
+    approval:
+      required: false
+      approvers: []
+    notifications:
+      slack_channel: "#dev-deployments"
+      teams_webhook: ""
+    
+  staging:
+    name: "staging"
+    kubernetes:
+      namespace: "banking-platform-staging"
+      cluster: "banking-platform-staging-aks"
+      resource_group: "banking-platform-staging-rg"
+    database:
+      server: "banking-platform-staging-sql.database.windows.net"
+      backup_retention: 14
+    monitoring:
+      retention_days: 30
+      alert_severity: "warning"
+    scaling:
+      min_replicas: 2
+      max_replicas: 5
+      cpu_threshold: 70
+    features:
+      debug_enabled: false
+      detailed_logging: true
+      swagger_enabled: true
+    security:
+      private_endpoints: false
+      network_policies: true
+    approval:
+      required: true
+      approvers: ["platform-team"]
+    notifications:
+      slack_channel: "#staging-deployments"
+      teams_webhook: ""
+    
+  production:
+    name: "production"
+    kubernetes:
+      namespace: "banking-platform-prod"
+      cluster: "banking-platform-prod-aks"
+      resource_group: "banking-platform-prod-rg"
+    database:
+      server: "banking-platform-prod-sql.database.windows.net"
+      backup_retention: 90
+    monitoring:
+      retention_days: 90
+      alert_severity: "critical"
+    scaling:
+      min_replicas: 3
+      max_replicas: 20
+      cpu_threshold: 60
+    features:
+      debug_enabled: false
+      detailed_logging: false
+      swagger_enabled: false
+    security:
+      private_endpoints: true
+      network_policies: true
+    approval:
+      required: true
+      approvers: ["platform-team", "devops-team", "security-team"]
+    notifications:
+      slack_channel: "#production-deployments"
+      teams_webhook: ""
+
+# Deployment strategies by environment
+deployment_strategies:
+  development:
+    type: "rolling_update"
+    max_unavailable: "50%"
+    max_surge: "50%"
+    
+  staging:
+    type: "rolling_update"
+    max_unavailable: "25%"
+    max_surge: "25%"
+    
+  production:
+    type: "blue_green"
+    rollback_timeout: "300s"
+    health_check_timeout: "180s"
+
+# Quality gates by environment
+quality_gates:
+  development:
+    code_coverage: 60
+    security_scan: "high"
+    performance_test: false
+    
+  staging:
+    code_coverage: 70
+    security_scan: "high"
+    performance_test: true
+    
+  production:
+    code_coverage: 80
+    security_scan: "critical"
+    performance_test: true
+    manual_approval: true
+
+# Environment promotion rules
+promotion_rules:
+  - from: "development"
+    to: "staging"
+    trigger: "automatic"
+    conditions:
+      - "all_tests_pass"
+      - "security_scan_pass"
+      
+  - from: "staging"
+    to: "production"
+    trigger: "manual"
+    conditions:
+      - "manual_approval"
+      - "performance_test_pass"
+      - "security_review_complete"

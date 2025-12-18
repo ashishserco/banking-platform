@@ -1,0 +1,498 @@
+# Azure DevOps CI/CD Pipeline for Banking Platform
+# Enterprise-grade automated deployment pipeline
+
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+    - release/*
+  paths:
+    exclude:
+    - docs/*
+    - README.md
+
+pr:
+  branches:
+    include:
+    - main
+    - develop
+  paths:
+    exclude:
+    - docs/*
+    - README.md
+
+variables:
+  # Global Variables
+  - name: buildConfiguration
+    value: 'Release'
+  - name: vmImageName
+    value: 'ubuntu-latest'
+  - name: dockerRegistryServiceConnection
+    value: 'banking-platform-acr'
+  - name: kubernetesServiceConnection
+    value: 'banking-platform-aks'
+  - name: containerRegistry
+    value: 'bankingplatformacr.azurecr.io'
+  - name: helmChartPath
+    value: 'helm/banking-platform'
+  
+  # Environment-specific variable groups
+  - group: banking-platform-dev
+  - group: banking-platform-staging
+  - group: banking-platform-prod
+
+stages:
+- stage: Build
+  displayName: 'Build and Test'
+  jobs:
+  - job: BuildBackend
+    displayName: 'Build Backend Services'
+    pool:
+      vmImage: $(vmImageName)
+    
+    steps:
+    - checkout: self
+      fetchDepth: 0
+    
+    - task: UseDotNet@2
+      displayName: 'Use .NET 8.0'
+      inputs:
+        packageType: 'sdk'
+        version: '8.0.x'
+    
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore NuGet packages'
+      inputs:
+        command: 'restore'
+        projects: 'backend/**/*.csproj'
+        feedsToUse: 'select'
+    
+    - task: DotNetCoreCLI@2
+      displayName: 'Build backend services'
+      inputs:
+        command: 'build'
+        projects: 'backend/**/*.csproj'
+        arguments: '--configuration $(buildConfiguration) --no-restore'
+    
+    - task: DotNetCoreCLI@2
+      displayName: 'Run unit tests'
+      inputs:
+        command: 'test'
+        projects: 'backend/**/*Tests.csproj'
+        arguments: '--configuration $(buildConfiguration) --no-build --collect:"XPlat Code Coverage" --logger trx --results-directory $(Agent.TempDirectory)'
+    
+    - task: PublishCodeCoverageResults@1
+      displayName: 'Publish code coverage'
+      inputs:
+        codeCoverageTool: 'Cobertura'
+        summaryFileLocation: '$(Agent.TempDirectory)/**/coverage.cobertura.xml'
+    
+    - task: PublishTestResults@2
+      displayName: 'Publish test results'
+      inputs:
+        testResultsFormat: 'VSTest'
+        testResultsFiles: '$(Agent.TempDirectory)/**/*.trx'
+
+  - job: BuildFrontend
+    displayName: 'Build Frontend'
+    pool:
+      vmImage: $(vmImageName)
+    
+    steps:
+    - checkout: self
+      fetchDepth: 0
+    
+    - task: NodeTool@0
+      displayName: 'Use Node.js 18.x'
+      inputs:
+        versionSpec: '18.x'
+    
+    - task: Npm@1
+      displayName: 'Install dependencies'
+      inputs:
+        command: 'ci'
+        workingDir: 'frontend/banking-ui'
+    
+    - task: Npm@1
+      displayName: 'Run tests'
+      inputs:
+        command: 'custom'
+        customCommand: 'run test -- --coverage --watchAll=false'
+        workingDir: 'frontend/banking-ui'
+    
+    - task: Npm@1
+      displayName: 'Build frontend'
+      inputs:
+        command: 'custom'
+        customCommand: 'run build'
+        workingDir: 'frontend/banking-ui'
+    
+    - task: PublishCodeCoverageResults@1
+      displayName: 'Publish frontend code coverage'
+      inputs:
+        codeCoverageTool: 'Cobertura'
+        summaryFileLocation: 'frontend/banking-ui/coverage/cobertura-coverage.xml'
+    
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish frontend artifacts'
+      inputs:
+        PathtoPublish: 'frontend/banking-ui/build'
+        ArtifactName: 'frontend-build'
+
+  - job: SecurityScan
+    displayName: 'Security Scanning'
+    pool:
+      vmImage: $(vmImageName)
+    
+    steps:
+    - checkout: self
+      fetchDepth: 0
+    
+    - task: NuGetToolInstaller@1
+      displayName: 'Install NuGet'
+    
+    - task: DotNetCoreCLI@2
+      displayName: 'Install security scanning tools'
+      inputs:
+        command: 'custom'
+        custom: 'tool'
+        arguments: 'install --global security-scan'
+    
+    - script: |
+        # Install Node.js security scanner
+        npm install -g audit-ci
+      displayName: 'Install Node.js security tools'
+    
+    - script: |
+        # Scan .NET dependencies for vulnerabilities
+        dotnet list backend/Banking.sln package --vulnerable --include-transitive
+      displayName: 'Scan .NET vulnerabilities'
+      continueOnError: true
+    
+    - script: |
+        # Scan Node.js dependencies
+        cd frontend/banking-ui
+        npm audit --audit-level high
+      displayName: 'Scan Node.js vulnerabilities'
+      continueOnError: true
+    
+    - task: SonarCloudPrepare@1
+      displayName: 'Prepare SonarCloud analysis'
+      inputs:
+        SonarCloud: 'SonarCloud'
+        organization: 'banking-platform'
+        scannerMode: 'MSBuild'
+        projectKey: 'banking-platform'
+        projectName: 'Banking Platform'
+    
+    - task: SonarCloudAnalyze@1
+      displayName: 'Run SonarCloud analysis'
+    
+    - task: SonarCloudPublish@1
+      displayName: 'Publish SonarCloud results'
+
+- stage: ContainerBuild
+  displayName: 'Build Container Images'
+  dependsOn: Build
+  condition: succeeded()
+  
+  jobs:
+  - job: BuildImages
+    displayName: 'Build Docker Images'
+    pool:
+      vmImage: $(vmImageName)
+    
+    strategy:
+      matrix:
+        AccountService:
+          serviceName: 'account-service'
+          dockerFile: 'docker/backend/AccountService.Dockerfile'
+          buildContext: 'backend'
+        TransactionService:
+          serviceName: 'transaction-service'
+          dockerFile: 'docker/backend/TransactionService.Dockerfile'
+          buildContext: 'backend'
+        PaymentService:
+          serviceName: 'payment-service'
+          dockerFile: 'docker/backend/PaymentService.Dockerfile'
+          buildContext: 'backend'
+        NotificationService:
+          serviceName: 'notification-service'
+          dockerFile: 'docker/backend/NotificationService.Dockerfile'
+          buildContext: 'backend'
+        Frontend:
+          serviceName: 'frontend'
+          dockerFile: 'docker/frontend/Dockerfile'
+          buildContext: 'frontend/banking-ui'
+    
+    steps:
+    - checkout: self
+      fetchDepth: 0
+    
+    - task: Docker@2
+      displayName: 'Build image $(serviceName)'
+      inputs:
+        containerRegistry: '$(dockerRegistryServiceConnection)'
+        repository: '$(serviceName)'
+        command: 'build'
+        Dockerfile: '$(dockerFile)'
+        buildContext: '$(buildContext)'
+        tags: |
+          $(Build.BuildId)
+          latest
+        arguments: '--build-arg BUILD_NUMBER=$(Build.BuildId)'
+    
+    - task: Docker@2
+      displayName: 'Push image $(serviceName)'
+      inputs:
+        containerRegistry: '$(dockerRegistryServiceConnection)'
+        repository: '$(serviceName)'
+        command: 'push'
+        tags: |
+          $(Build.BuildId)
+          latest
+    
+    - script: |
+        # Run container security scan
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+          -v $(pwd):/tmp aquasec/trivy image \
+          --exit-code 0 --severity HIGH,CRITICAL \
+          $(containerRegistry)/$(serviceName):$(Build.BuildId)
+      displayName: 'Security scan $(serviceName) image'
+      continueOnError: true
+
+- stage: DeployDev
+  displayName: 'Deploy to Development'
+  dependsOn: ContainerBuild
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+  
+  jobs:
+  - deployment: DeployToDev
+    displayName: 'Deploy to Dev Environment'
+    pool:
+      vmImage: $(vmImageName)
+    environment: 'banking-platform-dev'
+    
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          
+          - task: HelmInstaller@1
+            displayName: 'Install Helm'
+            inputs:
+              helmVersionToInstall: 'latest'
+          
+          - task: KubernetesManifest@0
+            displayName: 'Create namespace'
+            inputs:
+              action: 'deploy'
+              kubernetesServiceConnection: '$(kubernetesServiceConnection)'
+              namespace: 'banking-platform-dev'
+              manifests: |
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: banking-platform-dev
+          
+          - task: HelmDeploy@0
+            displayName: 'Deploy banking platform'
+            inputs:
+              connectionType: 'Kubernetes Service Connection'
+              kubernetesServiceConnection: '$(kubernetesServiceConnection)'
+              namespace: 'banking-platform-dev'
+              command: 'upgrade'
+              chartType: 'FilePath'
+              chartPath: '$(helmChartPath)'
+              releaseName: 'banking-platform-dev'
+              arguments: |
+                --install
+                --wait
+                --timeout 600s
+                --set global.image.tag=$(Build.BuildId)
+                --set global.environment=development
+                --set global.registry=$(containerRegistry)
+                -f helm/banking-platform/values-dev.yaml
+          
+          - script: |
+              # Wait for deployment to be ready
+              kubectl wait --for=condition=available --timeout=300s deployment/banking-platform-dev-account-service -n banking-platform-dev
+              kubectl wait --for=condition=available --timeout=300s deployment/banking-platform-dev-transaction-service -n banking-platform-dev
+              kubectl wait --for=condition=available --timeout=300s deployment/banking-platform-dev-payment-service -n banking-platform-dev
+              kubectl wait --for=condition=available --timeout=300s deployment/banking-platform-dev-notification-service -n banking-platform-dev
+              kubectl wait --for=condition=available --timeout=300s deployment/banking-platform-dev-frontend -n banking-platform-dev
+            displayName: 'Wait for deployment readiness'
+          
+          - script: |
+              # Run health checks
+              kubectl get pods -n banking-platform-dev
+              kubectl get svc -n banking-platform-dev
+            displayName: 'Verify deployment health'
+
+- stage: IntegrationTests
+  displayName: 'Integration Tests'
+  dependsOn: DeployDev
+  condition: succeeded()
+  
+  jobs:
+  - job: ApiTests
+    displayName: 'API Integration Tests'
+    pool:
+      vmImage: $(vmImageName)
+    
+    steps:
+    - checkout: self
+    
+    - task: NodeTool@0
+      displayName: 'Use Node.js 18.x'
+      inputs:
+        versionSpec: '18.x'
+    
+    - script: |
+        # Install Newman for API testing
+        npm install -g newman
+        npm install -g newman-reporter-htmlextra
+      displayName: 'Install testing tools'
+    
+    - script: |
+        # Run Postman/Newman API tests
+        newman run tests/api/banking-platform.postman_collection.json \
+          --environment tests/api/dev-environment.json \
+          --reporters cli,htmlextra \
+          --reporter-htmlextra-export $(Agent.TempDirectory)/api-test-results.html
+      displayName: 'Run API integration tests'
+      continueOnError: true
+    
+    - task: PublishHtmlReport@1
+      displayName: 'Publish API test results'
+      inputs:
+        reportDir: '$(Agent.TempDirectory)/api-test-results.html'
+
+- stage: DeployStaging
+  displayName: 'Deploy to Staging'
+  dependsOn: IntegrationTests
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  
+  jobs:
+  - deployment: DeployToStaging
+    displayName: 'Deploy to Staging Environment'
+    pool:
+      vmImage: $(vmImageName)
+    environment: 'banking-platform-staging'
+    
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          
+          - task: HelmDeploy@0
+            displayName: 'Deploy to staging'
+            inputs:
+              connectionType: 'Kubernetes Service Connection'
+              kubernetesServiceConnection: '$(kubernetesServiceConnection)'
+              namespace: 'banking-platform-staging'
+              command: 'upgrade'
+              chartType: 'FilePath'
+              chartPath: '$(helmChartPath)'
+              releaseName: 'banking-platform-staging'
+              arguments: |
+                --install
+                --wait
+                --timeout 600s
+                --set global.image.tag=$(Build.BuildId)
+                --set global.environment=staging
+                --set global.registry=$(containerRegistry)
+                -f helm/banking-platform/values-staging.yaml
+
+- stage: ProductionApproval
+  displayName: 'Production Deployment Approval'
+  dependsOn: DeployStaging
+  condition: and(succeeded(), contains(variables['Build.SourceBranch'], 'refs/heads/release/'))
+  
+  jobs:
+  - job: WaitForValidation
+    displayName: 'Wait for external validation'
+    pool: server
+    timeoutInMinutes: 4320 # 3 days
+    steps:
+    - task: ManualValidation@0
+      displayName: 'Manual validation for production deployment'
+      inputs:
+        notifyUsers: |
+          platform-team@banking-platform.com
+          devops-team@banking-platform.com
+        instructions: |
+          Please review the staging deployment and approve for production:
+          
+          1. Verify all services are healthy in staging
+          2. Review security scan results
+          3. Check performance metrics
+          4. Validate business functionality
+          5. Confirm compliance requirements
+          
+          Staging URL: https://staging.banking-platform.com
+        onTimeout: 'reject'
+
+- stage: DeployProduction
+  displayName: 'Deploy to Production'
+  dependsOn: ProductionApproval
+  condition: succeeded()
+  
+  jobs:
+  - deployment: DeployToProduction
+    displayName: 'Deploy to Production Environment'
+    pool:
+      vmImage: $(vmImageName)
+    environment: 'banking-platform-production'
+    
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          
+          - script: |
+              # Pre-deployment backup
+              echo "Creating pre-deployment backup..."
+              # Add backup commands here
+            displayName: 'Create pre-deployment backup'
+          
+          - task: HelmDeploy@0
+            displayName: 'Deploy to production (Blue-Green)'
+            inputs:
+              connectionType: 'Kubernetes Service Connection'
+              kubernetesServiceConnection: '$(kubernetesServiceConnection)'
+              namespace: 'banking-platform-prod'
+              command: 'upgrade'
+              chartType: 'FilePath'
+              chartPath: '$(helmChartPath)'
+              releaseName: 'banking-platform-prod'
+              arguments: |
+                --install
+                --wait
+                --timeout 1200s
+                --set global.image.tag=$(Build.BuildId)
+                --set global.environment=production
+                --set global.registry=$(containerRegistry)
+                --set deployment.strategy=bluegreen
+                -f helm/banking-platform/values-prod.yaml
+          
+          - script: |
+              # Post-deployment verification
+              echo "Running post-deployment health checks..."
+              kubectl get pods -n banking-platform-prod
+              kubectl top pods -n banking-platform-prod
+              
+              # Check service health endpoints
+              echo "Checking service health..."
+              # Add health check commands here
+            displayName: 'Post-deployment verification'
+          
+          - script: |
+              # Send deployment notification
+              echo "Sending deployment notifications..."
+              # Add notification commands here
+            displayName: 'Send deployment notifications'

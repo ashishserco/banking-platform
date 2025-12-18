@@ -1,0 +1,186 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: elasticsearch-config
+  namespace: observability
+data:
+  elasticsearch.yml: |
+    cluster.name: banking-platform-logs
+    node.name: ${HOSTNAME}
+    node.master: true
+    node.data: true
+    node.ingest: true
+    network.host: 0.0.0.0
+    http.port: 9200
+    transport.port: 9300
+    
+    # Discovery
+    discovery.seed_hosts: []
+    cluster.initial_master_nodes: ["elasticsearch-0"]
+    
+    # Security (disable for demo - enable in production)
+    xpack.security.enabled: false
+    xpack.security.transport.ssl.enabled: false
+    xpack.security.http.ssl.enabled: false
+    
+    # Index management
+    action.auto_create_index: true
+    action.destructive_requires_name: true
+    
+    # Memory settings
+    bootstrap.memory_lock: false
+    
+    # Performance tuning
+    thread_pool.write.queue_size: 1000
+    thread_pool.search.queue_size: 1000
+    
+    # Index templates for banking logs
+    index.number_of_shards: 1
+    index.number_of_replicas: 0
+    index.refresh_interval: 30s
+    
+    # Banking-specific index patterns
+    index.mapping.total_fields.limit: 2000
+    index.mapping.depth.limit: 20
+    index.mapping.nested_fields.limit: 100
+    
+    # Log retention
+    indices.lifecycle.poll_interval: 10m
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: elasticsearch-index-templates
+  namespace: observability
+data:
+  banking-logs-template.json: |
+    {
+      "index_patterns": ["banking-logs-*"],
+      "template": {
+        "settings": {
+          "number_of_shards": 1,
+          "number_of_replicas": 0,
+          "index.refresh_interval": "30s",
+          "index.codec": "best_compression",
+          "index.lifecycle.name": "banking-logs-policy"
+        },
+        "mappings": {
+          "properties": {
+            "@timestamp": {"type": "date"},
+            "level": {"type": "keyword"},
+            "message": {"type": "text", "analyzer": "standard"},
+            "service": {"type": "keyword"},
+            "namespace": {"type": "keyword"},
+            "pod": {"type": "keyword"},
+            "container": {"type": "keyword"},
+            "customer_id": {"type": "keyword"},
+            "transaction_id": {"type": "keyword"},
+            "correlation_id": {"type": "keyword"},
+            "banking_operation": {"type": "keyword"},
+            "account_number": {"type": "keyword"},
+            "amount": {"type": "float"},
+            "currency": {"type": "keyword"},
+            "transaction_type": {"type": "keyword"},
+            "status_code": {"type": "integer"},
+            "response_time": {"type": "float"},
+            "user_agent": {"type": "text"},
+            "ip_address": {"type": "ip"},
+            "request_id": {"type": "keyword"},
+            "error": {
+              "properties": {
+                "type": {"type": "keyword"},
+                "message": {"type": "text"},
+                "stack_trace": {"type": "text"},
+                "code": {"type": "keyword"}
+              }
+            },
+            "security": {
+              "properties": {
+                "authentication_status": {"type": "keyword"},
+                "authorization_status": {"type": "keyword"},
+                "user_id": {"type": "keyword"},
+                "role": {"type": "keyword"},
+                "permissions": {"type": "keyword"}
+              }
+            },
+            "performance": {
+              "properties": {
+                "cpu_usage": {"type": "float"},
+                "memory_usage": {"type": "float"},
+                "database_query_time": {"type": "float"},
+                "external_api_time": {"type": "float"}
+              }
+            }
+          }
+        }
+      }
+    }
+  
+  banking-metrics-template.json: |
+    {
+      "index_patterns": ["banking-metrics-*"],
+      "template": {
+        "settings": {
+          "number_of_shards": 1,
+          "number_of_replicas": 0,
+          "index.refresh_interval": "60s",
+          "index.lifecycle.name": "banking-metrics-policy"
+        },
+        "mappings": {
+          "properties": {
+            "@timestamp": {"type": "date"},
+            "metric_name": {"type": "keyword"},
+            "metric_value": {"type": "float"},
+            "service": {"type": "keyword"},
+            "environment": {"type": "keyword"},
+            "labels": {"type": "object"},
+            "tags": {"type": "keyword"}
+          }
+        }
+      }
+    }
+
+  ilm-policy.json: |
+    {
+      "policy": {
+        "phases": {
+          "hot": {
+            "min_age": "0ms",
+            "actions": {
+              "rollover": {
+                "max_size": "5gb",
+                "max_age": "1d"
+              },
+              "set_priority": {
+                "priority": 100
+              }
+            }
+          },
+          "warm": {
+            "min_age": "7d",
+            "actions": {
+              "set_priority": {
+                "priority": 50
+              },
+              "allocate": {
+                "number_of_replicas": 0
+              }
+            }
+          },
+          "cold": {
+            "min_age": "30d",
+            "actions": {
+              "set_priority": {
+                "priority": 0
+              }
+            }
+          },
+          "delete": {
+            "min_age": "90d",
+            "actions": {
+              "delete": {}
+            }
+          }
+        }
+      }
+    }

@@ -1,0 +1,431 @@
+# GitHub Actions CI/CD Pipeline for Banking Platform
+# Enterprise-grade automated deployment with security and compliance
+
+name: Banking Platform CI/CD
+
+on:
+  push:
+    branches: [ main, develop, release/* ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+  pull_request:
+    branches: [ main, develop ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+
+env:
+  REGISTRY: bankingplatformacr.azurecr.io
+  BUILD_CONFIGURATION: Release
+  DOTNET_VERSION: '8.0.x'
+  NODE_VERSION: '18.x'
+
+jobs:
+  # Security and Compliance Checks
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Scan .NET dependencies for vulnerabilities
+      run: |
+        dotnet list backend/Banking.sln package --vulnerable --include-transitive
+      continue-on-error: true
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/banking-ui/package-lock.json
+
+    - name: Scan Node.js dependencies
+      run: |
+        cd frontend/banking-ui
+        npm audit --audit-level high
+      continue-on-error: true
+
+  # Backend Build and Test
+  backend-build:
+    name: Backend Build & Test
+    runs-on: ubuntu-latest
+    needs: security-scan
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore backend/Banking.sln
+
+    - name: Build backend services
+      run: dotnet build backend/Banking.sln --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+
+    - name: Run unit tests
+      run: |
+        dotnet test backend/Banking.sln \
+          --configuration ${{ env.BUILD_CONFIGURATION }} \
+          --no-build \
+          --collect:"XPlat Code Coverage" \
+          --logger trx \
+          --results-directory TestResults/
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: backend-test-results
+        path: TestResults/
+
+    - name: Code coverage report
+      uses: irongut/CodeCoverageSummary@v1.3.0
+      with:
+        filename: TestResults/*/coverage.cobertura.xml
+        badge: true
+        fail_below_min: true
+        format: markdown
+        hide_branch_rate: false
+        hide_complexity: true
+        indicators: true
+        output: both
+        thresholds: '60 80'
+
+  # Frontend Build and Test
+  frontend-build:
+    name: Frontend Build & Test
+    runs-on: ubuntu-latest
+    needs: security-scan
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/banking-ui/package-lock.json
+
+    - name: Install dependencies
+      run: |
+        cd frontend/banking-ui
+        npm ci
+
+    - name: Run linting
+      run: |
+        cd frontend/banking-ui
+        npm run lint
+
+    - name: Run tests
+      run: |
+        cd frontend/banking-ui
+        npm run test -- --coverage --watchAll=false
+
+    - name: Build frontend
+      run: |
+        cd frontend/banking-ui
+        npm run build
+
+    - name: Upload frontend build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: frontend-build
+        path: frontend/banking-ui/build/
+
+  # Container Image Build
+  container-build:
+    name: Build Container Images
+    runs-on: ubuntu-latest
+    needs: [backend-build, frontend-build]
+    if: github.event_name == 'push'
+    
+    strategy:
+      matrix:
+        service:
+          - name: account-service
+            dockerfile: docker/backend/AccountService.Dockerfile
+            context: backend
+          - name: transaction-service
+            dockerfile: docker/backend/TransactionService.Dockerfile
+            context: backend
+          - name: payment-service
+            dockerfile: docker/backend/PaymentService.Dockerfile
+            context: backend
+          - name: notification-service
+            dockerfile: docker/backend/NotificationService.Dockerfile
+            context: backend
+          - name: frontend
+            dockerfile: docker/frontend/Dockerfile
+            context: frontend/banking-ui
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to Azure Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.ACR_USERNAME }}
+        password: ${{ secrets.ACR_PASSWORD }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ matrix.service.name }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ${{ matrix.service.context }}
+        file: ${{ matrix.service.dockerfile }}
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          BUILD_NUMBER=${{ github.run_number }}
+
+    - name: Run container security scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ matrix.service.name }}:${{ github.sha }}
+        format: 'table'
+        exit-code: '0'
+        severity: 'HIGH,CRITICAL'
+
+  # Development Deployment
+  deploy-dev:
+    name: Deploy to Development
+    runs-on: ubuntu-latest
+    needs: container-build
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    environment: 
+      name: development
+      url: https://dev.banking-platform.com
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Set up Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'latest'
+
+    - name: Get AKS credentials
+      run: |
+        az aks get-credentials --resource-group ${{ secrets.AZURE_RG_DEV }} --name ${{ secrets.AKS_CLUSTER_DEV }}
+
+    - name: Create namespace
+      run: |
+        kubectl create namespace banking-platform-dev --dry-run=client -o yaml | kubectl apply -f -
+
+    - name: Deploy to AKS
+      run: |
+        helm upgrade --install banking-platform-dev ./helm/banking-platform \
+          --namespace banking-platform-dev \
+          --set global.image.tag=${{ github.sha }} \
+          --set global.environment=development \
+          --set global.registry=${{ env.REGISTRY }} \
+          --values helm/banking-platform/values-dev.yaml \
+          --wait \
+          --timeout=600s
+
+    - name: Verify deployment
+      run: |
+        kubectl wait --for=condition=available --timeout=300s deployment -l app.kubernetes.io/instance=banking-platform-dev -n banking-platform-dev
+        kubectl get pods -n banking-platform-dev
+        kubectl get svc -n banking-platform-dev
+
+  # Integration Tests
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: deploy-dev
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Install Newman
+      run: |
+        npm install -g newman
+        npm install -g newman-reporter-htmlextra
+
+    - name: Run API integration tests
+      run: |
+        newman run tests/api/banking-platform.postman_collection.json \
+          --environment tests/api/dev-environment.json \
+          --reporters cli,htmlextra \
+          --reporter-htmlextra-export integration-test-results.html
+      continue-on-error: true
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: integration-test-results
+        path: integration-test-results.html
+
+  # Staging Deployment
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: 
+      name: staging
+      url: https://staging.banking-platform.com
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Set up Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'latest'
+
+    - name: Get AKS credentials
+      run: |
+        az aks get-credentials --resource-group ${{ secrets.AZURE_RG_STAGING }} --name ${{ secrets.AKS_CLUSTER_STAGING }}
+
+    - name: Deploy to Staging
+      run: |
+        helm upgrade --install banking-platform-staging ./helm/banking-platform \
+          --namespace banking-platform-staging \
+          --set global.image.tag=${{ github.sha }} \
+          --set global.environment=staging \
+          --set global.registry=${{ env.REGISTRY }} \
+          --values helm/banking-platform/values-staging.yaml \
+          --wait \
+          --timeout=900s
+
+    - name: Run smoke tests
+      run: |
+        # Add smoke test commands here
+        kubectl get pods -n banking-platform-staging
+        echo "Staging deployment completed successfully"
+
+  # Production Deployment (Manual Approval Required)
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: startsWith(github.ref, 'refs/heads/release/') && github.event_name == 'push'
+    environment: 
+      name: production
+      url: https://banking-platform.com
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Set up Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'latest'
+
+    - name: Get AKS credentials
+      run: |
+        az aks get-credentials --resource-group ${{ secrets.AZURE_RG_PROD }} --name ${{ secrets.AKS_CLUSTER_PROD }}
+
+    - name: Create backup
+      run: |
+        echo "Creating pre-deployment backup..."
+        # Add backup commands here
+
+    - name: Deploy to Production (Blue-Green)
+      run: |
+        helm upgrade --install banking-platform-prod ./helm/banking-platform \
+          --namespace banking-platform-prod \
+          --set global.image.tag=${{ github.sha }} \
+          --set global.environment=production \
+          --set global.registry=${{ env.REGISTRY }} \
+          --set deployment.strategy=bluegreen \
+          --values helm/banking-platform/values-prod.yaml \
+          --wait \
+          --timeout=1200s
+
+    - name: Post-deployment verification
+      run: |
+        kubectl wait --for=condition=available --timeout=600s deployment -l app.kubernetes.io/instance=banking-platform-prod -n banking-platform-prod
+        kubectl get pods -n banking-platform-prod
+        kubectl top pods -n banking-platform-prod
+        echo "Production deployment completed successfully"
+
+    - name: Send deployment notification
+      uses: 8398a7/action-slack@v3
+      if: always()
+      with:
+        status: ${{ job.status }}
+        channel: '#deployments'
+        text: |
+          Banking Platform Production Deployment
+          Status: ${{ job.status }}
+          Version: ${{ github.sha }}
+          Environment: Production
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

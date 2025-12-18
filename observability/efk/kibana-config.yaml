@@ -1,0 +1,121 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kibana-config
+  namespace: observability
+data:
+  kibana.yml: |
+    server.name: kibana
+    server.host: 0.0.0.0
+    server.port: 5601
+    
+    # Elasticsearch configuration
+    elasticsearch.hosts: ["http://elasticsearch:9200"]
+    elasticsearch.requestTimeout: 90000
+    elasticsearch.shardTimeout: 30000
+    
+    # Security (disable for demo)
+    xpack.security.enabled: false
+    xpack.encryptedSavedObjects.encryptionKey: "min-32-char-long-strong-encryption-key"
+    
+    # Monitoring
+    monitoring.ui.container.elasticsearch.enabled: true
+    
+    # Banking platform specific settings
+    server.basePath: ""
+    server.rewriteBasePath: false
+    
+    # Default index patterns
+    kibana.defaultAppId: "discover"
+    kibana.index: ".kibana"
+    
+    # Logging
+    logging.appenders.file.type: file
+    logging.appenders.file.fileName: /var/log/kibana.log
+    logging.appenders.file.layout.type: json
+    
+    logging.loggers:
+      - name: elasticsearch
+        level: warn
+      - name: elasticsearch.query
+        level: warn
+    
+    # Performance tuning
+    server.maxPayload: 1048576
+    elasticsearch.pingTimeout: 1500
+    elasticsearch.requestHeadersWhitelist: ["authorization"]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kibana-dashboards
+  namespace: observability
+data:
+  banking-operations.json: |
+    {
+      "version": "7.17.0",
+      "objects": [
+        {
+          "id": "banking-operations-dashboard",
+          "type": "dashboard",
+          "attributes": {
+            "title": "Banking Operations Dashboard",
+            "description": "Overview of banking platform operations and transaction flows",
+            "panelsJSON": "[{\"version\":\"7.17.0\",\"type\":\"visualization\",\"gridData\":{\"x\":0,\"y\":0,\"w\":24,\"h\":15},\"panelIndex\":\"1\",\"embeddableConfig\":{\"title\":\"Transaction Volume Over Time\"},\"panelRefName\":\"panel_1\"}]",
+            "timeRestore": true,
+            "timeTo": "now",
+            "timeFrom": "now-24h",
+            "refreshInterval": {
+              "pause": false,
+              "value": 60000
+            },
+            "kibanaSavedObjectMeta": {
+              "searchSourceJSON": "{\"query\":{\"match_all\":{}},\"filter\":[]}"
+            }
+          }
+        }
+      ]
+    }
+
+  security-monitoring.json: |
+    {
+      "version": "7.17.0",
+      "objects": [
+        {
+          "id": "security-monitoring-dashboard",
+          "type": "dashboard",
+          "attributes": {
+            "title": "Security Monitoring Dashboard",
+            "description": "Security events, authentication failures, and suspicious activities",
+            "panelsJSON": "[{\"version\":\"7.17.0\",\"type\":\"visualization\",\"gridData\":{\"x\":0,\"y\":0,\"w\":24,\"h\":15},\"panelIndex\":\"1\",\"embeddableConfig\":{\"title\":\"Authentication Failures\"},\"panelRefName\":\"panel_1\"}]",
+            "timeRestore": true,
+            "timeTo": "now",
+            "timeFrom": "now-24h"
+          }
+        }
+      ]
+    }
+
+  index-patterns.json: |
+    {
+      "version": "7.17.0",
+      "objects": [
+        {
+          "id": "banking-logs-*",
+          "type": "index-pattern",
+          "attributes": {
+            "title": "banking-logs-*",
+            "timeFieldName": "@timestamp",
+            "fields": "[{\"name\":\"@timestamp\",\"type\":\"date\",\"searchable\":true,\"aggregatable\":true},{\"name\":\"level\",\"type\":\"string\",\"searchable\":true,\"aggregatable\":true},{\"name\":\"service\",\"type\":\"string\",\"searchable\":true,\"aggregatable\":true},{\"name\":\"customer_id\",\"type\":\"string\",\"searchable\":true,\"aggregatable\":true},{\"name\":\"transaction_id\",\"type\":\"string\",\"searchable\":true,\"aggregatable\":true},{\"name\":\"banking_operation\",\"type\":\"string\",\"searchable\":true,\"aggregatable\":true}]"
+          }
+        },
+        {
+          "id": "istio-logs-*",
+          "type": "index-pattern",
+          "attributes": {
+            "title": "istio-logs-*",
+            "timeFieldName": "@timestamp"
+          }
+        }
+      ]
+    }

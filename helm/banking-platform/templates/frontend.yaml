@@ -1,0 +1,92 @@
+{{- if .Values.services.frontend.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "banking-platform.fullname" . }}-frontend
+  labels:
+    {{- include "banking-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "banking-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: frontend
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "banking-platform.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: frontend
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "banking-platform.serviceAccountName" . }}
+      {{- include "banking-platform.podSecurityContext" . | nindent 6 }}
+      containers:
+        - name: frontend
+          {{- include "banking-platform.securityContext" . | nindent 10 }}
+          image: {{ include "banking-platform.image" (dict "repository" .Values.image.repository.frontend "Values" .Values) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          env:
+            - name: REACT_APP_API_BASE_URL
+              value: "http://{{ include "banking-platform.fullname" . }}-api-gateway/api"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+          {{- include "banking-platform.resources" (dict "resources" .Values.resources.frontend) | nindent 10 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "banking-platform.fullname" . }}-frontend
+  labels:
+    {{- include "banking-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  type: {{ .Values.services.frontend.type }}
+  ports:
+    - port: {{ .Values.services.frontend.port }}
+      targetPort: {{ .Values.services.frontend.targetPort }}
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "banking-platform.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+{{- end }}

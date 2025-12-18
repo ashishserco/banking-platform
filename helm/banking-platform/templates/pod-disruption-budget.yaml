@@ -1,0 +1,71 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "banking-platform.fullname" . }}-account-service
+  labels:
+    {{- include "banking-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: account-service
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "banking-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: account-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "banking-platform.fullname" . }}-transaction-service
+  labels:
+    {{- include "banking-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: transaction-service
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "banking-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: transaction-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "banking-platform.fullname" . }}-payment-service
+  labels:
+    {{- include "banking-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: payment-service
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "banking-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: payment-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "banking-platform.fullname" . }}-notification-service
+  labels:
+    {{- include "banking-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: notification-service
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "banking-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: notification-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "banking-platform.fullname" . }}-api-gateway
+  labels:
+    {{- include "banking-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api-gateway
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "banking-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api-gateway
+{{- end }}

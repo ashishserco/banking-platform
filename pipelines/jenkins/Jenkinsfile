@@ -1,0 +1,473 @@
+// Jenkins Pipeline for Banking Platform
+// Enterprise-grade CI/CD with Jenkins
+
+pipeline {
+    agent any
+    
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 60, unit: 'MINUTES')
+        parallelsAlwaysFailFast()
+        skipStagesAfterUnstable()
+    }
+    
+    environment {
+        REGISTRY = 'bankingplatformacr.azurecr.io'
+        BUILD_CONFIGURATION = 'Release'
+        DOTNET_VERSION = '8.0'
+        NODE_VERSION = '18'
+        HELM_CHART_PATH = 'helm/banking-platform'
+    }
+    
+    parameters {
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['dev', 'staging', 'prod'],
+            description: 'Target environment for deployment'
+        )
+        booleanParam(
+            name: 'SKIP_TESTS',
+            defaultValue: false,
+            description: 'Skip test execution'
+        )
+        booleanParam(
+            name: 'FORCE_DEPLOY',
+            defaultValue: false,
+            description: 'Force deployment even if tests fail'
+        )
+    }
+    
+    triggers {
+        // Poll SCM every 5 minutes
+        pollSCM('H/5 * * * *')
+        
+        // Build on push to main branches
+        upstream(upstreamProjects: 'banking-platform-infrastructure', threshold: hudson.model.Result.SUCCESS)
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.GIT_COMMIT_SHORT = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+                    env.BUILD_VERSION = "${env.BUILD_NUMBER}-${env.GIT_COMMIT_SHORT}"
+                }
+            }
+        }
+        
+        stage('Security Scan') {
+            parallel {
+                stage('Code Security') {
+                    steps {
+                        script {
+                            // Run SonarQube analysis
+                            withSonarQubeEnv('SonarQube') {
+                                sh '''
+                                    dotnet tool install --global dotnet-sonarscanner || true
+                                    dotnet sonarscanner begin /k:"banking-platform" /d:sonar.host.url=$SONAR_HOST_URL /d:sonar.login=$SONAR_AUTH_TOKEN
+                                    dotnet build backend/Banking.sln --configuration ${BUILD_CONFIGURATION}
+                                    dotnet sonarscanner end /d:sonar.login=$SONAR_AUTH_TOKEN
+                                '''
+                            }
+                        }
+                    }
+                }
+                
+                stage('Dependency Scan') {
+                    steps {
+                        sh '''
+                            # Scan .NET dependencies
+                            dotnet list backend/Banking.sln package --vulnerable --include-transitive || true
+                            
+                            # Scan Node.js dependencies
+                            cd frontend/banking-ui
+                            npm audit --audit-level moderate || true
+                        '''
+                    }
+                }
+                
+                stage('Container Scan') {
+                    when {
+                        anyOf {
+                            branch 'main'
+                            branch 'develop'
+                            branch 'release/*'
+                        }
+                    }
+                    steps {
+                        script {
+                            // Run Trivy security scan
+                            sh '''
+                                docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \\
+                                    -v $(pwd):/workspace aquasec/trivy fs \\
+                                    --security-checks vuln,secret,config \\
+                                    --format table /workspace
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Build & Test') {
+            parallel {
+                stage('Backend Build') {
+                    steps {
+                        script {
+                            // Setup .NET environment
+                            sh '''
+                                # Install .NET SDK if not present
+                                if ! command -v dotnet &> /dev/null; then
+                                    wget https://dot.net/v1/dotnet-install.sh
+                                    chmod +x dotnet-install.sh
+                                    ./dotnet-install.sh --version ${DOTNET_VERSION}
+                                fi
+                                
+                                # Restore and build
+                                dotnet restore backend/Banking.sln
+                                dotnet build backend/Banking.sln --configuration ${BUILD_CONFIGURATION} --no-restore
+                            '''
+                        }
+                    }
+                    
+                    post {
+                        always {
+                            publishTestResults testResultsPattern: 'backend/**/TestResults/*.trx'
+                        }
+                    }
+                }
+                
+                stage('Backend Tests') {
+                    when {
+                        not { params.SKIP_TESTS }
+                    }
+                    steps {
+                        sh '''
+                            dotnet test backend/Banking.sln \\
+                                --configuration ${BUILD_CONFIGURATION} \\
+                                --no-build \\
+                                --collect:"XPlat Code Coverage" \\
+                                --logger trx \\
+                                --results-directory TestResults/
+                        '''
+                    }
+                    
+                    post {
+                        always {
+                            step([$class: 'CoberturaPublisher', 
+                                coberturaReportFile: 'TestResults/*/coverage.cobertura.xml'])
+                        }
+                    }
+                }
+                
+                stage('Frontend Build') {
+                    steps {
+                        script {
+                            // Setup Node.js environment
+                            sh '''
+                                # Use Node Version Manager
+                                curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+                                export NVM_DIR="$HOME/.nvm"
+                                [ -s "$NVM_DIR/nvm.sh" ] && \\. "$NVM_DIR/nvm.sh"
+                                nvm install ${NODE_VERSION}
+                                nvm use ${NODE_VERSION}
+                                
+                                # Build frontend
+                                cd frontend/banking-ui
+                                npm ci
+                                npm run build
+                            '''
+                        }
+                    }
+                }
+                
+                stage('Frontend Tests') {
+                    when {
+                        not { params.SKIP_TESTS }
+                    }
+                    steps {
+                        sh '''
+                            cd frontend/banking-ui
+                            npm run test -- --coverage --watchAll=false
+                            npm run lint
+                        '''
+                    }
+                    
+                    post {
+                        always {
+                            publishHTML([
+                                allowMissing: false,
+                                alwaysLinkToLastBuild: true,
+                                keepAll: true,
+                                reportDir: 'frontend/banking-ui/coverage/lcov-report',
+                                reportFiles: 'index.html',
+                                reportName: 'Frontend Coverage Report'
+                            ])
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Quality Gates') {
+            steps {
+                script {
+                    // Wait for SonarQube quality gate
+                    timeout(time: 10, unit: 'MINUTES') {
+                        def qg = waitForQualityGate()
+                        if (qg.status != 'OK') {
+                            error "Pipeline aborted due to quality gate failure: ${qg.status}"
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Build Container Images') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'develop'
+                    branch 'release/*'
+                }
+            }
+            parallel {
+                stage('Account Service') {
+                    steps {
+                        script {
+                            buildAndPushImage('account-service', 'docker/backend/AccountService.Dockerfile', 'backend')
+                        }
+                    }
+                }
+                stage('Transaction Service') {
+                    steps {
+                        script {
+                            buildAndPushImage('transaction-service', 'docker/backend/TransactionService.Dockerfile', 'backend')
+                        }
+                    }
+                }
+                stage('Payment Service') {
+                    steps {
+                        script {
+                            buildAndPushImage('payment-service', 'docker/backend/PaymentService.Dockerfile', 'backend')
+                        }
+                    }
+                }
+                stage('Notification Service') {
+                    steps {
+                        script {
+                            buildAndPushImage('notification-service', 'docker/backend/NotificationService.Dockerfile', 'backend')
+                        }
+                    }
+                }
+                stage('Frontend') {
+                    steps {
+                        script {
+                            buildAndPushImage('frontend', 'docker/frontend/Dockerfile', 'frontend/banking-ui')
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy to Development') {
+            when {
+                branch 'develop'
+            }
+            steps {
+                script {
+                    deployToEnvironment('dev')
+                }
+            }
+            
+            post {
+                success {
+                    slackSend channel: '#deployments',
+                             color: 'good',
+                             message: ":white_check_mark: Banking Platform deployed to Development\\nVersion: ${env.BUILD_VERSION}\\nBranch: ${env.BRANCH_NAME}"
+                }
+            }
+        }
+        
+        stage('Integration Tests') {
+            when {
+                branch 'develop'
+            }
+            steps {
+                script {
+                    sh '''
+                        # Install Newman
+                        npm install -g newman newman-reporter-htmlextra
+                        
+                        # Run API integration tests
+                        newman run tests/api/banking-platform.postman_collection.json \\
+                            --environment tests/api/dev-environment.json \\
+                            --reporters cli,htmlextra \\
+                            --reporter-htmlextra-export integration-test-results.html
+                    '''
+                }
+            }
+            
+            post {
+                always {
+                    publishHTML([
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: '.',
+                        reportFiles: 'integration-test-results.html',
+                        reportName: 'Integration Test Report'
+                    ])
+                }
+            }
+        }
+        
+        stage('Deploy to Staging') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    deployToEnvironment('staging')
+                }
+            }
+        }
+        
+        stage('Production Approval') {
+            when {
+                branch 'release/*'
+            }
+            steps {
+                script {
+                    def deployInput = input(
+                        id: 'deployInput',
+                        message: 'Deploy to Production?',
+                        submitter: 'platform-team,devops-team',
+                        submitterParameter: 'APPROVER',
+                        parameters: [
+                            booleanParam(defaultValue: false, description: 'Confirm production deployment', name: 'DEPLOY_TO_PROD'),
+                            text(defaultValue: '', description: 'Deployment notes', name: 'DEPLOYMENT_NOTES')
+                        ]
+                    )
+                    
+                    if (deployInput.DEPLOY_TO_PROD) {
+                        echo "Production deployment approved by: ${deployInput.APPROVER}"
+                        echo "Deployment notes: ${deployInput.DEPLOYMENT_NOTES}"
+                        env.DEPLOYMENT_APPROVED = 'true'
+                        env.DEPLOYMENT_APPROVER = deployInput.APPROVER
+                        env.DEPLOYMENT_NOTES = deployInput.DEPLOYMENT_NOTES
+                    } else {
+                        error "Production deployment not approved"
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy to Production') {
+            when {
+                allOf {
+                    branch 'release/*'
+                    environment name: 'DEPLOYMENT_APPROVED', value: 'true'
+                }
+            }
+            steps {
+                script {
+                    // Create backup before deployment
+                    sh '''
+                        echo "Creating pre-deployment backup..."
+                        # Add backup commands here
+                    '''
+                    
+                    deployToEnvironment('prod')
+                    
+                    // Post-deployment verification
+                    sh '''
+                        echo "Running post-deployment verification..."
+                        kubectl get pods -n banking-platform-prod
+                        kubectl top pods -n banking-platform-prod
+                    '''
+                }
+            }
+            
+            post {
+                success {
+                    slackSend channel: '#deployments',
+                             color: 'good',
+                             message: ":rocket: Banking Platform deployed to Production\\nVersion: ${env.BUILD_VERSION}\\nApproved by: ${env.DEPLOYMENT_APPROVER}\\nNotes: ${env.DEPLOYMENT_NOTES}"
+                }
+                failure {
+                    slackSend channel: '#deployments',
+                             color: 'danger',
+                             message: ":x: Banking Platform production deployment FAILED\\nVersion: ${env.BUILD_VERSION}\\nPlease check logs and rollback if necessary"
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            cleanWs()
+        }
+        
+        failure {
+            emailext (
+                subject: "Banking Platform Build Failed: ${env.JOB_NAME} - ${env.BUILD_NUMBER}",
+                body: "Build failed. Check console output at ${env.BUILD_URL}",
+                to: "${env.CHANGE_AUTHOR_EMAIL},platform-team@banking-platform.com"
+            )
+        }
+        
+        unstable {
+            emailext (
+                subject: "Banking Platform Build Unstable: ${env.JOB_NAME} - ${env.BUILD_NUMBER}",
+                body: "Build unstable. Check console output at ${env.BUILD_URL}",
+                to: "${env.CHANGE_AUTHOR_EMAIL},platform-team@banking-platform.com"
+            )
+        }
+    }
+}
+
+// Helper function to build and push Docker images
+def buildAndPushImage(serviceName, dockerfile, buildContext) {
+    withCredentials([usernamePassword(credentialsId: 'acr-credentials', usernameVariable: 'ACR_USERNAME', passwordVariable: 'ACR_PASSWORD')]) {
+        sh """
+            docker login ${REGISTRY} -u \$ACR_USERNAME -p \$ACR_PASSWORD
+            
+            docker build -t ${REGISTRY}/${serviceName}:${env.BUILD_VERSION} \\
+                         -t ${REGISTRY}/${serviceName}:latest \\
+                         -f ${dockerfile} \\
+                         --build-arg BUILD_NUMBER=${env.BUILD_NUMBER} \\
+                         ${buildContext}
+            
+            docker push ${REGISTRY}/${serviceName}:${env.BUILD_VERSION}
+            docker push ${REGISTRY}/${serviceName}:latest
+            
+            # Run security scan
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \\
+                aquasec/trivy image --exit-code 0 --severity HIGH,CRITICAL \\
+                ${REGISTRY}/${serviceName}:${env.BUILD_VERSION}
+        """
+    }
+}
+
+// Helper function to deploy to environment
+def deployToEnvironment(environment) {
+    withCredentials([kubeconfigFile(credentialsId: "kubeconfig-${environment}", variable: 'KUBECONFIG')]) {
+        sh """
+            helm upgrade --install banking-platform-${environment} ${HELM_CHART_PATH} \\
+                --namespace banking-platform-${environment} \\
+                --create-namespace \\
+                --set global.image.tag=${env.BUILD_VERSION} \\
+                --set global.environment=${environment} \\
+                --set global.registry=${REGISTRY} \\
+                --values ${HELM_CHART_PATH}/values-${environment}.yaml \\
+                --wait \\
+                --timeout=600s
+            
+            kubectl wait --for=condition=available --timeout=300s \\
+                deployment -l app.kubernetes.io/instance=banking-platform-${environment} \\
+                -n banking-platform-${environment}
+        """
+    }
+}

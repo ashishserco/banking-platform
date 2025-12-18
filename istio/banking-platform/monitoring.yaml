@@ -1,0 +1,117 @@
+apiVersion: v1
+kind: ServiceMonitor
+metadata:
+  name: banking-platform-istio-proxy
+  namespace: banking-platform
+  labels:
+    app: istio-proxy
+spec:
+  selector:
+    matchExpressions:
+    - key: app
+      operator: Exists
+  endpoints:
+  - port: http-monitoring
+    interval: 15s
+    path: /stats/prometheus
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod_name
+    - sourceLabels: [__meta_kubernetes_pod_container_name]
+      targetLabel: container_name
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+    metricRelabelings:
+    - sourceLabels: [__name__]
+      regex: 'istio_request_total'
+      targetLabel: __name__
+      replacement: 'banking_requests_total'
+    - sourceLabels: [__name__]
+      regex: 'istio_request_duration_milliseconds.*'
+      targetLabel: __name__
+      replacement: 'banking_request_duration_ms'
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: banking-platform-kiali
+  namespace: istio-system
+  labels:
+    app: kiali
+    version: v1.73
+spec:
+  ports:
+  - name: http
+    port: 20001
+    protocol: TCP
+    targetPort: 20001
+  selector:
+    app: kiali
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: kiali-vs
+  namespace: istio-system
+spec:
+  hosts:
+  - kiali.banking-platform.local
+  gateways:
+  - banking-platform/banking-platform-gateway
+  http:
+  - route:
+    - destination:
+        host: kiali
+        port:
+          number: 20001
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: jaeger-vs
+  namespace: istio-system
+spec:
+  hosts:
+  - jaeger.banking-platform.local
+  gateways:
+  - banking-platform/banking-platform-gateway
+  http:
+  - route:
+    - destination:
+        host: jaeger
+        port:
+          number: 16686
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: grafana-vs
+  namespace: istio-system
+spec:
+  hosts:
+  - grafana.banking-platform.local
+  gateways:
+  - banking-platform/banking-platform-gateway
+  http:
+  - route:
+    - destination:
+        host: grafana
+        port:
+          number: 3000
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: prometheus-vs
+  namespace: istio-system
+spec:
+  hosts:
+  - prometheus.banking-platform.local
+  gateways:
+  - banking-platform/banking-platform-gateway
+  http:
+  - route:
+    - destination:
+        host: prometheus
+        port:
+          number: 9090

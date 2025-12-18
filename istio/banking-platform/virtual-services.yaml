@@ -1,0 +1,168 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: banking-platform-frontend
+  namespace: banking-platform
+spec:
+  hosts:
+  - banking-platform.local
+  gateways:
+  - banking-platform-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /
+    - uri:
+        prefix: /static/
+    - uri:
+        prefix: /assets/
+    route:
+    - destination:
+        host: banking-platform-frontend
+        port:
+          number: 80
+    fault:
+      delay:
+        percentage:
+          value: 0.1
+        fixedDelay: 5s
+    retries:
+      attempts: 3
+      perTryTimeout: 2s
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: banking-platform-api
+  namespace: banking-platform
+spec:
+  hosts:
+  - banking-platform.local
+  gateways:
+  - banking-platform-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /api/account
+    route:
+    - destination:
+        host: banking-platform-account-service
+        port:
+          number: 80
+    fault:
+      abort:
+        percentage:
+          value: 0.1
+        httpStatus: 503
+    retries:
+      attempts: 3
+      perTryTimeout: 10s
+      retryOn: gateway-error,connect-failure,refused-stream
+    timeout: 30s
+  - match:
+    - uri:
+        prefix: /api/customer
+    route:
+    - destination:
+        host: banking-platform-account-service
+        port:
+          number: 80
+    retries:
+      attempts: 3
+      perTryTimeout: 10s
+    timeout: 30s
+  - match:
+    - uri:
+        prefix: /api/transaction
+    route:
+    - destination:
+        host: banking-platform-transaction-service
+        port:
+          number: 80
+    fault:
+      delay:
+        percentage:
+          value: 0.1
+        fixedDelay: 1s
+    retries:
+      attempts: 5
+      perTryTimeout: 30s
+      retryOn: gateway-error,connect-failure,refused-stream
+    timeout: 60s
+  - match:
+    - uri:
+        prefix: /api/payment
+    route:
+    - destination:
+        host: banking-platform-payment-service
+        port:
+          number: 80
+    retries:
+      attempts: 3
+      perTryTimeout: 30s
+      retryOn: gateway-error,connect-failure,refused-stream
+    timeout: 60s
+  - match:
+    - uri:
+        prefix: /api/beneficiary
+    route:
+    - destination:
+        host: banking-platform-payment-service
+        port:
+          number: 80
+    retries:
+      attempts: 3
+      perTryTimeout: 10s
+    timeout: 30s
+  - match:
+    - uri:
+        prefix: /api/notification
+    route:
+    - destination:
+        host: banking-platform-notification-service
+        port:
+          number: 80
+    retries:
+      attempts: 2
+      perTryTimeout: 15s
+    timeout: 30s
+  - match:
+    - uri:
+        prefix: /api/template
+    route:
+    - destination:
+        host: banking-platform-notification-service
+        port:
+          number: 80
+    retries:
+      attempts: 2
+      perTryTimeout: 10s
+    timeout: 20s
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: banking-platform-internal
+  namespace: banking-platform
+spec:
+  hosts:
+  - internal.banking-platform.local
+  gateways:
+  - banking-platform-internal-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /health
+    route:
+    - destination:
+        host: banking-platform-api-gateway
+        port:
+          number: 80
+  - match:
+    - uri:
+        prefix: /metrics
+    route:
+    - destination:
+        host: banking-platform-api-gateway
+        port:
+          number: 80

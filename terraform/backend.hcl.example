@@ -1,0 +1,12 @@
+# Backend configuration for Terraform state storage
+# Copy this file to backend.hcl and customize the values
+
+storage_account_name = "bankingplatformtfstate"
+container_name       = "tfstate"
+key                  = "banking-platform-dev.tfstate"
+resource_group_name  = "banking-platform-tfstate-rg"
+
+# Optional: Use Azure AD authentication instead of access keys
+# use_azuread_auth = true
+# subscription_id  = "your-subscription-id"
+# tenant_id       = "your-tenant-id"

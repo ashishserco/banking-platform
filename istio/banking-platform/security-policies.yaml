@@ -1,0 +1,170 @@
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: banking-platform-mtls
+  namespace: banking-platform
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: banking-platform-frontend-access
+  namespace: banking-platform
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: frontend
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"]
+  - to:
+    - operation:
+        methods: ["GET"]
+        paths: ["/", "/static/*", "/assets/*", "/health"]
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: banking-platform-api-access
+  namespace: banking-platform
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: account-service
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"]
+    - source:
+        principals: ["cluster.local/ns/banking-platform/sa/banking-platform"]
+  - to:
+    - operation:
+        methods: ["GET", "POST", "PUT", "PATCH", "DELETE"]
+        paths: ["/api/account/*", "/api/customer/*", "/health", "/metrics"]
+  - when:
+    - key: request.headers[authorization]
+      values: ["Bearer *"]
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: banking-platform-transaction-access
+  namespace: banking-platform
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: transaction-service
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"]
+    - source:
+        principals: ["cluster.local/ns/banking-platform/sa/banking-platform"]
+  - to:
+    - operation:
+        methods: ["GET", "POST", "PUT", "PATCH", "DELETE"]
+        paths: ["/api/transaction/*", "/health", "/metrics"]
+  - when:
+    - key: request.headers[authorization]
+      values: ["Bearer *"]
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: banking-platform-payment-access
+  namespace: banking-platform
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: payment-service
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"]
+    - source:
+        principals: ["cluster.local/ns/banking-platform/sa/banking-platform"]
+  - to:
+    - operation:
+        methods: ["GET", "POST", "PUT", "PATCH", "DELETE"]
+        paths: ["/api/payment/*", "/api/beneficiary/*", "/health", "/metrics"]
+  - when:
+    - key: request.headers[authorization]
+      values: ["Bearer *"]
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: banking-platform-notification-access
+  namespace: banking-platform
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: notification-service
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"]
+    - source:
+        principals: ["cluster.local/ns/banking-platform/sa/banking-platform"]
+  - to:
+    - operation:
+        methods: ["GET", "POST", "PUT", "PATCH", "DELETE"]
+        paths: ["/api/notification/*", "/api/template/*", "/health", "/metrics"]
+  - when:
+    - key: request.headers[authorization]
+      values: ["Bearer *"]
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: banking-platform-internal-communication
+  namespace: banking-platform
+spec:
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/banking-platform/sa/banking-platform"]
+  - to:
+    - operation:
+        methods: ["GET", "POST", "PUT", "PATCH", "DELETE"]
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: banking-platform-deny-all
+  namespace: banking-platform
+spec:
+  action: DENY
+  rules:
+  - from:
+    - source:
+        notPrincipals: [
+          "cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account",
+          "cluster.local/ns/banking-platform/sa/banking-platform",
+          "cluster.local/ns/monitoring/sa/prometheus-server"
+        ]
+---
+apiVersion: security.istio.io/v1beta1
+kind: RequestAuthentication
+metadata:
+  name: banking-platform-jwt
+  namespace: banking-platform
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: banking-platform
+  jwtRules:
+  - issuer: "banking-platform"
+    audiences:
+    - "banking-clients"
+    jwksUri: "http://banking-platform-account-service/api/auth/jwks"
+    forwardOriginalToken: true

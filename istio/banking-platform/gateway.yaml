@@ -1,0 +1,45 @@
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: banking-platform-gateway
+  namespace: banking-platform
+spec:
+  selector:
+    istio: ingressgateway # use Istio default controller
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - banking-platform.local
+    - "*.banking-platform.local"
+    tls:
+      httpsRedirect: true # sends 301 redirect for http requests
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    tls:
+      mode: SIMPLE # enables HTTPS on this port
+      credentialName: banking-platform-tls # certificate must be installed
+    hosts:
+    - banking-platform.local
+    - "*.banking-platform.local"
+---
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: banking-platform-internal-gateway
+  namespace: banking-platform
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 8080
+      name: internal-http
+      protocol: HTTP
+    hosts:
+    - internal.banking-platform.local
+    - "*.internal.banking-platform.local"

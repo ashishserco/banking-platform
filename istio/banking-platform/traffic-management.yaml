@@ -1,0 +1,168 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: banking-platform-canary-deployment
+  namespace: banking-platform
+spec:
+  hosts:
+  - banking-platform-account-service
+  http:
+  - match:
+    - headers:
+        canary:
+          exact: "true"
+    route:
+    - destination:
+        host: banking-platform-account-service
+        subset: v2
+      weight: 100
+  - route:
+    - destination:
+        host: banking-platform-account-service
+        subset: v1
+      weight: 90
+    - destination:
+        host: banking-platform-account-service
+        subset: v2
+      weight: 10
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: banking-platform-rate-limiting
+  namespace: banking-platform
+spec:
+  hosts:
+  - banking-platform.local
+  gateways:
+  - banking-platform-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /api/auth/login
+    route:
+    - destination:
+        host: banking-platform-account-service
+    fault:
+      delay:
+        percentage:
+          value: 0.1
+        fixedDelay: 2s
+    timeout: 10s
+    retries:
+      attempts: 2
+      perTryTimeout: 5s
+  - match:
+    - uri:
+        prefix: /api/transaction/transfer
+    route:
+    - destination:
+        host: banking-platform-transaction-service
+    timeout: 60s
+    retries:
+      attempts: 3
+      perTryTimeout: 20s
+      retryOn: gateway-error,connect-failure,refused-stream
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: banking-platform-rate-limit
+  namespace: banking-platform
+spec:
+  workloadSelector:
+    labels:
+      app.kubernetes.io/name: banking-platform
+  configPatches:
+  - applyTo: HTTP_FILTER
+    match:
+      context: SIDECAR_INBOUND
+      listener:
+        filterChain:
+          filter:
+            name: "envoy.filters.network.http_connection_manager"
+    patch:
+      operation: INSERT_BEFORE
+      value:
+        name: envoy.filters.http.local_ratelimit
+        typed_config:
+          "@type": type.googleapis.com/udpa.type.v1.TypedStruct
+          type_url: type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+          value:
+            stat_prefix: local_rate_limiter
+            token_bucket:
+              max_tokens: 1000
+              tokens_per_fill: 1000
+              fill_interval: 60s
+            filter_enabled:
+              runtime_key: local_rate_limit_enabled
+              default_value:
+                numerator: 100
+                denominator: HUNDRED
+            filter_enforced:
+              runtime_key: local_rate_limit_enforced
+              default_value:
+                numerator: 100
+                denominator: HUNDRED
+            response_headers_to_add:
+              - append: false
+                header:
+                  key: x-local-rate-limit
+                  value: 'true'
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: banking-platform-cors
+  namespace: banking-platform
+spec:
+  workloadSelector:
+    labels:
+      app.kubernetes.io/component: api-gateway
+  configPatches:
+  - applyTo: HTTP_FILTER
+    match:
+      context: SIDECAR_INBOUND
+      listener:
+        filterChain:
+          filter:
+            name: "envoy.filters.network.http_connection_manager"
+    patch:
+      operation: INSERT_BEFORE
+      value:
+        name: envoy.filters.http.cors
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.http.cors.v3.Cors
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: banking-platform-envoy-config
+  namespace: banking-platform
+data:
+  custom_bootstrap.json: |
+    {
+      "stats_sinks": [
+        {
+          "name": "envoy.stat_sinks.metrics_service",
+          "typed_config": {
+            "@type": "type.googleapis.com/envoy.config.metrics.v3.MetricsServiceConfig",
+            "grpc_service": {
+              "envoy_grpc": {
+                "cluster_name": "metrics-service"
+              }
+            }
+          }
+        }
+      ],
+      "tracing": {
+        "http": {
+          "name": "envoy.tracers.jaeger",
+          "typed_config": {
+            "@type": "type.googleapis.com/envoy.config.trace.v3.JaegerConfig",
+            "collector_cluster": "jaeger",
+            "collector_endpoint": "/api/traces"
+          }
+        }
+      }
+    }

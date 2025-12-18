@@ -1,0 +1,200 @@
+groups:
+- name: banking-platform.rules
+  rules:
+  # High-level banking business metrics
+  - alert: HighTransactionFailureRate
+    expr: |
+      (
+        sum(rate(banking_requests_total{service=~".*transaction.*", code!~"2.+"}[5m])) /
+        sum(rate(banking_requests_total{service=~".*transaction.*"}[5m]))
+      ) > 0.05
+    for: 2m
+    labels:
+      severity: critical
+      service: transaction-service
+      impact: business
+    annotations:
+      summary: "High transaction failure rate detected"
+      description: "Transaction service has {{ $value | humanizePercentage }} failure rate over the last 5 minutes"
+      runbook_url: "https://docs.banking-platform.com/runbooks/transaction-failures"
+
+  - alert: AccountServiceDown
+    expr: |
+      up{service="banking-platform-account-service"} == 0
+    for: 30s
+    labels:
+      severity: critical
+      service: account-service
+      impact: business
+    annotations:
+      summary: "Account service is down"
+      description: "Account service has been down for more than 30 seconds"
+      runbook_url: "https://docs.banking-platform.com/runbooks/service-down"
+
+  - alert: PaymentServiceHighLatency
+    expr: |
+      histogram_quantile(0.95, 
+        sum(rate(banking_request_duration_ms_bucket{service=~".*payment.*"}[5m])) by (le)
+      ) > 5000
+    for: 5m
+    labels:
+      severity: warning
+      service: payment-service
+      impact: performance
+    annotations:
+      summary: "High latency in payment service"
+      description: "95th percentile latency is {{ $value }}ms"
+      runbook_url: "https://docs.banking-platform.com/runbooks/high-latency"
+
+  - alert: DatabaseConnectionPoolExhausted
+    expr: |
+      database_connections_active / database_connections_max > 0.9
+    for: 2m
+    labels:
+      severity: warning
+      impact: infrastructure
+    annotations:
+      summary: "Database connection pool nearly exhausted"
+      description: "Database connection pool is {{ $value | humanizePercentage }} full"
+      runbook_url: "https://docs.banking-platform.com/runbooks/database-connections"
+
+  - alert: TooManyDuplicateTransactions
+    expr: |
+      increase(duplicate_transaction_attempts_total[5m]) > 100
+    for: 1m
+    labels:
+      severity: warning
+      impact: business
+    annotations:
+      summary: "High number of duplicate transaction attempts"
+      description: "{{ $value }} duplicate transactions detected in last 5 minutes"
+      runbook_url: "https://docs.banking-platform.com/runbooks/duplicate-transactions"
+
+- name: infrastructure.rules
+  rules:
+  - alert: HighMemoryUsage
+    expr: |
+      (
+        container_memory_usage_bytes{namespace="banking-platform"} / 
+        container_spec_memory_limit_bytes{namespace="banking-platform"}
+      ) > 0.9
+    for: 5m
+    labels:
+      severity: warning
+      impact: infrastructure
+    annotations:
+      summary: "High memory usage detected"
+      description: "Container {{ $labels.pod }} is using {{ $value | humanizePercentage }} of available memory"
+
+  - alert: HighCPUUsage
+    expr: |
+      rate(container_cpu_usage_seconds_total{namespace="banking-platform"}[5m]) > 0.8
+    for: 10m
+    labels:
+      severity: warning
+      impact: infrastructure
+    annotations:
+      summary: "High CPU usage detected"
+      description: "Container {{ $labels.pod }} CPU usage is {{ $value | humanizePercentage }}"
+
+  - alert: PodCrashLooping
+    expr: |
+      rate(kube_pod_container_status_restarts_total{namespace="banking-platform"}[5m]) > 0
+    for: 5m
+    labels:
+      severity: critical
+      impact: infrastructure
+    annotations:
+      summary: "Pod is crash looping"
+      description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is crash looping"
+
+  - alert: PersistentVolumeUsageHigh
+    expr: |
+      (
+        kubelet_volume_stats_used_bytes / 
+        kubelet_volume_stats_capacity_bytes
+      ) > 0.9
+    for: 5m
+    labels:
+      severity: warning
+      impact: infrastructure
+    annotations:
+      summary: "Persistent volume usage high"
+      description: "PV {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} full"
+
+- name: security.rules
+  rules:
+  - alert: TooManyAuthenticationFailures
+    expr: |
+      increase(authentication_failures_total[5m]) > 50
+    for: 1m
+    labels:
+      severity: warning
+      impact: security
+    annotations:
+      summary: "High number of authentication failures"
+      description: "{{ $value }} authentication failures in last 5 minutes"
+      runbook_url: "https://docs.banking-platform.com/runbooks/auth-failures"
+
+  - alert: SuspiciousAPIUsage
+    expr: |
+      rate(banking_requests_total{code="429"}[5m]) > 10
+    for: 2m
+    labels:
+      severity: warning
+      impact: security
+    annotations:
+      summary: "High rate of rate-limited requests"
+      description: "{{ $value }} requests per second are being rate limited"
+
+  - alert: UnauthorizedAccessAttempts
+    expr: |
+      increase(banking_requests_total{code="403"}[5m]) > 20
+    for: 1m
+    labels:
+      severity: critical
+      impact: security
+    annotations:
+      summary: "Multiple unauthorized access attempts"
+      description: "{{ $value }} unauthorized access attempts in last 5 minutes"
+      runbook_url: "https://docs.banking-platform.com/runbooks/unauthorized-access"
+
+- name: business.rules
+  rules:
+  - alert: TransactionVolumeAnomaly
+    expr: |
+      abs(
+        rate(transaction_processed_total[1h]) - 
+        rate(transaction_processed_total[1h] offset 1d)
+      ) / rate(transaction_processed_total[1h] offset 1d) > 0.5
+    for: 10m
+    labels:
+      severity: warning
+      impact: business
+    annotations:
+      summary: "Unusual transaction volume detected"
+      description: "Transaction volume is {{ $value | humanizePercentage }} different from same time yesterday"
+
+  - alert: HighValueTransactionSpike
+    expr: |
+      increase(high_value_transactions_total[5m]) > 
+      increase(high_value_transactions_total[5m] offset 1h) * 3
+    for: 2m
+    labels:
+      severity: warning
+      impact: business
+    annotations:
+      summary: "Spike in high-value transactions"
+      description: "High-value transaction count increased by {{ $value }}x compared to 1 hour ago"
+
+  - alert: NotificationServiceBacklog
+    expr: |
+      notification_queue_size > 1000
+    for: 5m
+    labels:
+      severity: warning
+      impact: business
+    annotations:
+      summary: "Notification service has large backlog"
+      description: "{{ $value }} notifications pending in queue"
+      runbook_url: "https://docs.banking-platform.com/runbooks/notification-backlog"

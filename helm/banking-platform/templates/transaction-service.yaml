@@ -1,0 +1,122 @@
+{{- if .Values.services.transactionService.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "banking-platform.fullname" . }}-transaction-service
+  labels:
+    {{- include "banking-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: transaction-service
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "banking-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: transaction-service
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+      labels:
+        {{- include "banking-platform.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: transaction-service
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "banking-platform.serviceAccountName" . }}
+      {{- include "banking-platform.podSecurityContext" . | nindent 6 }}
+      containers:
+        - name: transaction-service
+          {{- include "banking-platform.securityContext" . | nindent 10 }}
+          image: {{ include "banking-platform.image" (dict "repository" .Values.image.repository.transactionService "Values" .Values) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          env:
+            {{- include "banking-platform.commonEnvVars" . | nindent 12 }}
+            - name: ConnectionStrings__DefaultConnection
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "banking-platform.fullname" . }}-database
+                  key: transactions-connection-string
+            - name: Services__AccountService__BaseUrl
+              value: "http://{{ include "banking-platform.fullname" . }}-account-service"
+          {{- include "banking-platform.healthChecks" . | nindent 10 }}
+          {{- include "banking-platform.resources" (dict "resources" .Values.resources.transactionService) | nindent 10 }}
+          volumeMounts:
+            - name: logs
+              mountPath: /app/logs
+      volumes:
+        - name: logs
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "banking-platform.fullname" . }}-transaction-service
+  labels:
+    {{- include "banking-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: transaction-service
+spec:
+  type: {{ .Values.services.transactionService.type }}
+  ports:
+    - port: {{ .Values.services.transactionService.port }}
+      targetPort: {{ .Values.services.transactionService.targetPort }}
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "banking-platform.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: transaction-service
+{{- if .Values.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "banking-platform.fullname" . }}-transaction-service
+  labels:
+    {{- include "banking-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: transaction-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "banking-platform.fullname" . }}-transaction-service
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    {{- if .Values.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+{{- end }}
+{{- end }}

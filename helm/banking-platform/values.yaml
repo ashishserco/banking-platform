@@ -1,0 +1,323 @@
+# Default values for banking-platform
+# This is a YAML-formatted file.
+
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
+  
+replicaCount: 1
+
+image:
+  repository:
+    accountService: banking-platform/account-service
+    transactionService: banking-platform/transaction-service
+    paymentService: banking-platform/payment-service
+    notificationService: banking-platform/notification-service
+    frontend: banking-platform/banking-ui
+    apiGateway: banking-platform/api-gateway
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Service Account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Pod Security Context
+podSecurityContext:
+  fsGroup: 65534
+  runAsNonRoot: true
+  runAsUser: 65534
+
+# Container Security Context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 65534
+
+# Services Configuration
+services:
+  frontend:
+    enabled: true
+    type: ClusterIP
+    port: 80
+    targetPort: 80
+    
+  apiGateway:
+    enabled: true
+    type: LoadBalancer
+    port: 80
+    targetPort: 80
+    annotations: {}
+    # For Azure:
+    # service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+    # For AWS:
+    # service.beta.kubernetes.io/aws-load-balancer-type: nlb
+    
+  accountService:
+    enabled: true
+    type: ClusterIP
+    port: 80
+    targetPort: 80
+    
+  transactionService:
+    enabled: true
+    type: ClusterIP
+    port: 80
+    targetPort: 80
+    
+  paymentService:
+    enabled: true
+    type: ClusterIP
+    port: 80
+    targetPort: 80
+    
+  notificationService:
+    enabled: true
+    type: ClusterIP
+    port: 80
+    targetPort: 80
+
+# Ingress Configuration
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: banking-platform.local
+      paths:
+        - path: /
+          pathType: Prefix
+          service: frontend
+        - path: /api
+          pathType: Prefix
+          service: apiGateway
+  tls:
+    - secretName: banking-platform-tls
+      hosts:
+        - banking-platform.local
+
+# Resources
+resources:
+  frontend:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+      
+  apiGateway:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+      
+  accountService:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 1000m
+      memory: 1Gi
+      
+  transactionService:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 1000m
+      memory: 1Gi
+      
+  paymentService:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 1000m
+      memory: 1Gi
+      
+  notificationService:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+# Autoscaling
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Node Selection
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Configuration
+config:
+  # JWT Configuration
+  jwt:
+    secretKey: "ThisIsASecretKeyThatShouldBeStoredInAzureKeyVaultInProduction"
+    issuer: "banking-platform"
+    audience: "banking-clients"
+    expiryHours: 24
+    
+  # Database Configuration
+  database:
+    host: "postgresql"
+    port: 5432
+    username: "banking"
+    password: "BankingPassword123!"
+    accountsDb: "BankingAccountsDb"
+    transactionsDb: "BankingTransactionsDb"
+    paymentsDb: "BankingPaymentsDb"
+    notificationsDb: "BankingNotificationsDb"
+    
+  # Redis Configuration
+  redis:
+    host: "redis-master"
+    port: 6379
+    password: ""
+    database: 0
+    
+  # External Services
+  services:
+    azureServiceBus:
+      connectionString: "Endpoint=sb://banking-platform.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=YOUR_SERVICE_BUS_KEY"
+    sendGrid:
+      apiKey: "YOUR_SENDGRID_API_KEY"
+      fromEmail: "noreply@banking-platform.com"
+      fromName: "Banking Platform"
+    twilio:
+      accountSid: "YOUR_TWILIO_ACCOUNT_SID"
+      authToken: "YOUR_TWILIO_AUTH_TOKEN"
+      fromNumber: "+1234567890"
+    firebase:
+      serverKey: "YOUR_FIREBASE_SERVER_KEY"
+
+# Persistence
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 20Gi
+
+# Dependencies Configuration
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: "BankingPassword123!"
+    username: "banking"
+    password: "BankingPassword123!"
+    database: "banking"
+  primary:
+    persistence:
+      enabled: true
+      size: 20Gi
+  metrics:
+    enabled: true
+
+redis:
+  enabled: true
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+  metrics:
+    enabled: true
+
+elasticsearch:
+  enabled: true
+  master:
+    replicaCount: 1
+  data:
+    replicaCount: 1
+  coordinating:
+    replicaCount: 1
+  ingest:
+    replicaCount: 1
+
+prometheus:
+  enabled: true
+  alertmanager:
+    enabled: true
+  server:
+    persistentVolume:
+      enabled: true
+      size: 10Gi
+
+grafana:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 5Gi
+  adminPassword: "admin"
+
+# Health Checks
+healthChecks:
+  enabled: true
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+    successThreshold: 1
+  readinessProbe:
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+    successThreshold: 1
+
+# Network Policies
+networkPolicy:
+  enabled: true
+  ingress: []
+  egress: []
+
+# Pod Security Policy
+podSecurityPolicy:
+  enabled: false
+
+# Service Monitor for Prometheus
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  interval: 30s
+  scrapeTimeout: 10s
+
+# Logging
+logging:
+  level: "Information"
+  structured: true
+  console: true
+  elasticsearch:
+    enabled: true
+    index: "banking-platform"

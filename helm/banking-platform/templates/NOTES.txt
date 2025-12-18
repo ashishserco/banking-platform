@@ -1,0 +1,76 @@
+🏦 Banking Platform has been deployed successfully!
+
+Chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+Release: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+{{ if .Values.ingress.enabled }}
+Your banking platform is available at:
+{{- range $host := .Values.ingress.hosts }}
+{{- range .paths }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}{{ .path }}
+{{- end }}
+{{- end }}
+{{ else }}
+To access your banking platform:
+
+1. Get the API Gateway URL:
+{{ if contains "NodePort" .Values.services.apiGateway.type }}
+   export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "banking-platform.fullname" . }}-api-gateway)
+   export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+   echo http://$NODE_IP:$NODE_PORT
+{{ else if contains "LoadBalancer" .Values.services.apiGateway.type }}
+   NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+         You can watch the status by running: kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "banking-platform.fullname" . }}-api-gateway
+   export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "banking-platform.fullname" . }}-api-gateway --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+   echo http://$SERVICE_IP:{{ .Values.services.apiGateway.port }}
+{{ else if contains "ClusterIP" .Values.services.apiGateway.type }}
+   kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "banking-platform.fullname" . }}-api-gateway 8080:{{ .Values.services.apiGateway.port }}
+   echo "Visit http://127.0.0.1:8080 to access the API Gateway"
+{{ end }}
+
+2. Get the Frontend URL:
+{{ if contains "NodePort" .Values.services.frontend.type }}
+   export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "banking-platform.fullname" . }}-frontend)
+   export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+   echo http://$NODE_IP:$NODE_PORT
+{{ else if contains "LoadBalancer" .Values.services.frontend.type }}
+   export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "banking-platform.fullname" . }}-frontend --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+   echo http://$SERVICE_IP:{{ .Values.services.frontend.port }}
+{{ else if contains "ClusterIP" .Values.services.frontend.type }}
+   kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "banking-platform.fullname" . }}-frontend 3000:{{ .Values.services.frontend.port }}
+   echo "Visit http://127.0.0.1:3000 to access the Banking UI"
+{{ end }}
+{{ end }}
+
+📊 Monitoring:
+{{ if .Values.prometheus.enabled }}
+- Prometheus: Access metrics and monitoring dashboards
+{{ end }}
+{{ if .Values.grafana.enabled }}
+- Grafana: Visualize metrics and create custom dashboards (admin/{{ .Values.grafana.adminPassword }})
+{{ end }}
+{{ if .Values.elasticsearch.enabled }}
+- Kibana: Search and analyze logs
+{{ end }}
+
+🔍 Health Checks:
+You can check the health of your services:
+  kubectl get pods --namespace {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+📋 Service Status:
+  kubectl get svc --namespace {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+🚀 Default Login Credentials:
+  Email: demo@bankingplatform.com
+  Password: demo123
+
+📖 For more information, visit the documentation at:
+   https://github.com/banking-platform/cloud-native-banking
+
+⚠️  Security Notice:
+   This is a demo installation. For production use:
+   1. Change all default passwords
+   2. Configure proper SSL certificates
+   3. Set up external secret management
+   4. Configure proper backup strategies
