@@ -9,6 +9,8 @@ using TransactionService.Services;
 using FluentValidation.AspNetCore;
 using Polly;
 
+using Polly.Extensions.Http;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Configure Serilog
@@ -96,7 +98,7 @@ builder.Services.AddSwaggerGen(c =>
 
 // Health Checks
 builder.Services.AddHealthChecks()
-    .AddDbContext<TransactionDbContext>();
+    .AddDbContextCheck<TransactionDbContext>();
 
 // CORS
 builder.Services.AddCors(options =>
@@ -155,22 +157,16 @@ app.Run();
 
 static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy()
 {
-    return Policy
-        .HandleResult<HttpResponseMessage>(r => !r.IsSuccessStatusCode)
-        .Or<HttpRequestException>()
-        .WaitAndRetryAsync(
-            retryCount: 3,
-            sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
+    return HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
 }
 
 static IAsyncPolicy<HttpResponseMessage> GetCircuitBreakerPolicy()
 {
-    return Policy
-        .HandleResult<HttpResponseMessage>(r => !r.IsSuccessStatusCode)
-        .Or<HttpRequestException>()
-        .CircuitBreakerAsync(
-            exceptionsAllowedBeforeBreaking: 5,
-            durationOfBreak: TimeSpan.FromSeconds(30));
+    return HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .CircuitBreakerAsync(5, TimeSpan.FromSeconds(30));
 }
 
 public partial class Program { } // For testing

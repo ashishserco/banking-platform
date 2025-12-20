@@ -90,7 +90,7 @@ builder.Services.AddSwaggerGen(c =>
 
 // Health Checks
 builder.Services.AddHealthChecks()
-    .AddDbContext<NotificationDbContext>();
+    .AddDbContextCheck<NotificationDbContext>();
 
 // CORS
 builder.Services.AddCors(options =>

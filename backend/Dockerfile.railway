@@ -1,0 +1,56 @@
+# Use the official .NET SDK image for building
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+# Copy all project files for restoration
+COPY ["AccountService/AccountService.csproj", "AccountService/"]
+COPY ["TransactionService/TransactionService.csproj", "TransactionService/"]
+COPY ["PaymentService/PaymentService.csproj", "PaymentService/"]
+COPY ["NotificationService/NotificationService.csproj", "NotificationService/"]
+COPY ["SupportService/SupportService.csproj", "SupportService/"]
+COPY ["ApiGateway/ApiGateway.csproj", "ApiGateway/"]
+COPY ["Shared/Banking.Shared/Banking.Shared.csproj", "Shared/Banking.Shared/"]
+
+# Restore dependencies
+RUN dotnet restore "AccountService/AccountService.csproj"
+RUN dotnet restore "TransactionService/TransactionService.csproj"
+RUN dotnet restore "PaymentService/PaymentService.csproj"
+RUN dotnet restore "NotificationService/NotificationService.csproj"
+RUN dotnet restore "SupportService/SupportService.csproj"
+RUN dotnet restore "ApiGateway/ApiGateway.csproj"
+
+# Copy source code
+COPY . .
+
+# Build all applications
+RUN dotnet publish "AccountService/AccountService.csproj" -c Release -o /app/account
+RUN dotnet publish "TransactionService/TransactionService.csproj" -c Release -o /app/transaction
+RUN dotnet publish "PaymentService/PaymentService.csproj" -c Release -o /app/payment
+RUN dotnet publish "NotificationService/NotificationService.csproj" -c Release -o /app/notification
+RUN dotnet publish "SupportService/SupportService.csproj" -c Release -o /app/support
+RUN dotnet publish "ApiGateway/ApiGateway.csproj" -c Release -o /app/gateway
+
+# Use the runtime image
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+WORKDIR /app
+
+# Install dependencies for Nginx if needed, but we'll use a simple reverse proxy or direct routing
+RUN apt-get update && apt-get install -y procps curl && rm -rf /var/lib/apt/lists/*
+
+# Copy built applications
+COPY --from=build /app/account ./account
+COPY --from=build /app/transaction ./transaction
+COPY --from=build /app/payment ./payment
+COPY --from=build /app/notification ./notification
+COPY --from=build /app/support ./support
+COPY --from=build /app/gateway ./gateway
+
+# Copy startup script
+COPY start-services.sh .
+RUN chmod +x start-services.sh
+
+# Expose the port that Railway will use (default 8080)
+EXPOSE 8080
+
+# Start script to run all services
+CMD ["./start-services.sh"]

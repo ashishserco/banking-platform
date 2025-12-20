@@ -92,7 +92,7 @@ builder.Services.AddSwaggerGen(c =>
 
 // Health Checks
 builder.Services.AddHealthChecks()
-    .AddDbContext<PaymentDbContext>();
+    .AddDbContextCheck<PaymentDbContext>();
 
 // CORS
 builder.Services.AddCors(options =>
