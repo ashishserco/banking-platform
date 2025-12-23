@@ -55,7 +55,7 @@ export const BalanceTrendChart: React.FC = () => {
                     Balance Trend (Last 6 Months)
                 </Typography>
                 <Box sx={{ width: '100%', height: 300, mt: 2 }}>
-                    <ResponsiveContainer>
+                    <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={balanceTrendData}>
                             <defs>
                                 <linearGradient id="colorBalance" x1="0" y1="0" x2="0" y2="1">
@@ -99,7 +99,7 @@ export const SpendingChart: React.FC = () => {
                     Spending by Category
                 </Typography>
                 <Box sx={{ width: '100%', height: 300, mt: 2 }}>
-                    <ResponsiveContainer>
+                    <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                             <Pie
                                 data={spendingData}
@@ -142,7 +142,7 @@ export const MonthlyTransactionsChart: React.FC = () => {
                     Monthly Transaction Activity
                 </Typography>
                 <Box sx={{ width: '100%', height: 300, mt: 2 }}>
-                    <ResponsiveContainer>
+                    <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={monthlyTransactionsData}>
                             <CartesianGrid strokeDasharray="3 3" stroke={theme.palette.divider} />
                             <XAxis dataKey="month" stroke={theme.palette.text.secondary} />

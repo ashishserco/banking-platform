@@ -23,7 +23,6 @@ import {
 import {
     Lock,
     LockOpen,
-    Security,
     Settings,
     TrendingUp,
     Warning as WarningIcon
@@ -45,12 +44,9 @@ export const CardsPage: React.FC = () => {
 
     const [pinDialogOpen, setPinDialogOpen] = useState(false);
     const [pin, setPinValue] = useState('');
-    const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
-    const [paymentAmount, setPaymentAmount] = useState('');
 
     // Mock credit card outstanding balance (would come from API)
     const outstandingBalance = card?.type === 'Credit' ? 2450.75 : 0;
-    const dueDate = '2025-12-28';
 
     const handleTabChange = (_: any, newValue: number) => {
         setCardTypeTab(newValue);
@@ -161,7 +157,7 @@ export const CardsPage: React.FC = () => {
                                                 fullWidth
                                                 variant="contained"
                                                 color="primary"
-                                                onClick={() => { setPaymentAmount(outstandingBalance.toString()); setPaymentDialogOpen(true); }}
+                                                onClick={() => alert(`Pay ${outstandingBalance} - feature coming soon`)}
                                                 sx={{ py: 1.5, borderRadius: 2, fontWeight: 700 }}
                                             >
                                                 Pay Credit Card Bill (${outstandingBalance})

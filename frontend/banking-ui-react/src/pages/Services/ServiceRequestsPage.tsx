@@ -21,14 +21,12 @@ import {
 } from '@mui/material';
 import {
     MenuBook,
-    CreditCard,
     Block,
     Description
 } from '@mui/icons-material';
 
 export const ServiceRequestsPage: React.FC = () => {
     const [tabValue, setTabValue] = useState(0);
-    const [requestType, setRequestType] = useState('');
     const [submitted, setSubmitted] = useState(false);
     const [formData, setFormData] = useState({
         accountNumber: '',
@@ -59,7 +57,7 @@ export const ServiceRequestsPage: React.FC = () => {
                     <br />
                     You will receive an update within 24-48 hours.
                 </Alert>
-                <Button variant="contained" onClick={() => { setSubmitted(false); setRequestType(''); }}>
+                <Button variant="contained" onClick={() => { setSubmitted(false); }}>
                     Submit Another Request
                 </Button>
             </Container>

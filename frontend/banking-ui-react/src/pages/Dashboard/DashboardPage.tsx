@@ -34,7 +34,6 @@ import {
     Download as DownloadIcon,
     Notifications as NotificationsIcon,
     Info as InfoIcon,
-    Settings as SettingsIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { formatCurrency, formatDate } from '@/utils/formatters';

@@ -8,7 +8,7 @@ import { updateBalance } from '@/store/slices/accountSlice';
 
 // Transfer Mode Info Component
 const TransferModeInfo: React.FC<{ mode: string; amount: number }> = ({ mode, amount }) => {
-    const modeInfo: { [key: string]: { limit: number; charges: string; timing: string; speed: string; color: 'success' | 'info' | 'warning' | 'primary' } } = {
+    const modeInfo: { [key: string]: { limit: number; charges: string; timing: string; speed: string; color: 'success' | 'info' | 'warning' } } = {
         IMPS: {
             limit: 500000,
             charges: amount > 1000 ? '$0.50' : 'Free',
@@ -28,7 +28,7 @@ const TransferModeInfo: React.FC<{ mode: string; amount: number }> = ({ mode, am
             charges: amount < 200000 ? '$30' : '$55',
             timing: 'Monday-Friday: 9AM - 4:30PM, Saturday: 9AM - 2PM',
             speed: 'Real-time (within 30 minutes)',
-            color: 'primary'
+            color: 'warning'
         },
         UPI: {
             limit: 100000,
@@ -79,7 +79,8 @@ export const PaymentsPage: React.FC = () => {
         toBeneficiaryId: '',
         amount: '',
         transferMode: 'IMPS', // Default to IMPS
-        remarks: ''
+        remarks: '',
+        ref: ''
     });
     const [billData, setBillData] = React.useState({ category: '', consumerNo: '' });
     const [rechargeData, setRechargeData] = React.useState({ number: '', operator: '', amount: '' });
@@ -94,21 +95,32 @@ export const PaymentsPage: React.FC = () => {
     };
 
     const handleTransfer = () => {
-        const beneficiary = beneficiaries.find(b => b.id.toString() === transferData.toBeneficiaryId);
-        if (!beneficiary) return;
+        if (!transferData.fromAcc || !transferData.toBeneficiaryId || !transferData.amount) {
+            alert('Please fill all required fields');
+            return;
+        }
+
+        const beneficiary = beneficiaries.find(b => b.id === parseInt(transferData.toBeneficiaryId) || b.id.toString() === transferData.toBeneficiaryId);
+        if (!beneficiary) {
+            console.log('Beneficiaries:', beneficiaries);
+            console.log('Selected ID:', transferData.toBeneficiaryId);
+            alert('Beneficiary not found');
+            return;
+        }
 
         const amountNum = parseFloat(transferData.amount);
-
-        // Update Account Balance
-        if (transferData.fromAcc) {
-            dispatch(updateBalance({ id: transferData.fromAcc, amount: -amountNum }));
+        if (isNaN(amountNum) || amountNum <= 0) {
+            alert('Please enter a valid amount');
+            return;
         }
+
+        dispatch(updateBalance({ id: transferData.fromAcc, amount: -amountNum }));
 
         dispatch(addTransaction({
             desc: `Transfer to ${beneficiary.name}`,
             type: 'Debit',
             amount: -amountNum,
-            ref: transferData.remarks || `TRX-${Date.now().toString().slice(-6)}`,
+            ref: transferData.ref || `TRX-${Date.now().toString().slice(-6)}`,
             category: 'Transfer'
         }));
         dispatch(addNotification({
@@ -117,7 +129,7 @@ export const PaymentsPage: React.FC = () => {
             type: 'debit'
         }));
         setSuccessMessage(`Successfully transferred $${amountNum} to ${beneficiary.name}`);
-        setTransferData({ fromAcc: '', toBeneficiaryId: '', amount: '', transferMode: 'IMPS', remarks: '' });
+        setTransferData({ fromAcc: '', toBeneficiaryId: '', amount: '', transferMode: 'IMPS', remarks: '', ref: '' });
     };
 
     const handlePayBill = () => {
@@ -199,7 +211,7 @@ export const PaymentsPage: React.FC = () => {
                         <>
                             {tabValue === 0 && (
                                 <Grid container spacing={3}>
-                                    <Grid item xs={12}>
+                                    <Grid size={{ xs: 12 }}>
                                         <Typography variant="h6" gutterBottom>Transfer Details</Typography>
                                     </Grid>
                                     <Grid size={{ xs: 12, md: 6 }}>
@@ -231,7 +243,7 @@ export const PaymentsPage: React.FC = () => {
                                         </TextField>
                                     </Grid>
                                     {transferData.toBeneficiaryId && (
-                                        <Grid item xs={12}>
+                                        <Grid size={{ xs: 12 }}>
                                             <Paper variant="outlined" sx={{ p: 2, bgcolor: 'action.hover' }}>
                                                 <Typography variant="caption" color="text.secondary">Transferring to:</Typography>
                                                 <Typography variant="body1" fontWeight={600}>
@@ -246,7 +258,7 @@ export const PaymentsPage: React.FC = () => {
                                             </Paper>
                                         </Grid>
                                     )}
-                                    <Grid item xs={12}>
+                                    <Grid size={{ xs: 12 }}>
                                         <TextField
                                             fullWidth
                                             select
@@ -261,10 +273,10 @@ export const PaymentsPage: React.FC = () => {
                                             <MenuItem value="UPI">UPI - Instant (24x7)</MenuItem>
                                         </TextField>
                                     </Grid>
-                                    <Grid item xs={12}>
+                                    <Grid size={{ xs: 12 }}>
                                         <TransferModeInfo mode={transferData.transferMode} amount={parseFloat(transferData.amount) || 0} />
                                     </Grid>
-                                    <Grid item xs={12}>
+                                    <Grid size={{ xs: 12 }}>
                                         <TextField
                                             fullWidth
                                             label="Amount"

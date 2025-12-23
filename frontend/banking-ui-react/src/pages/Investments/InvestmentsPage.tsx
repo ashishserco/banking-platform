@@ -10,9 +10,8 @@ import {
     Button,
     Chip,
     Stack,
-    LinearProgress
 } from '@mui/material';
-import { TrendingUp, AccountBalanceWallet } from '@mui/icons-material';
+import { AccountBalanceWallet } from '@mui/icons-material';
 import { formatCurrency } from '@/utils/formatters';
 
 export const InvestmentsPage: React.FC = () => {

@@ -24,7 +24,6 @@ import {
     Settings as SettingsIcon,
     Savings as SavingsIcon,
     CurrencyExchange as CurrencyExchangeIcon,
-    Insights as InsightsIcon,
     CreditCard as CreditCardIcon,
     TrendingUp as TrendingUpIcon,
     AutoAwesome as AutoAwesomeIcon,

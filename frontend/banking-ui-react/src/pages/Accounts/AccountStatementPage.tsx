@@ -17,7 +17,7 @@ import {
     Chip,
     Alert
 } from '@mui/material';
-import { Download, CalendarToday } from '@mui/icons-material';
+import { Download } from '@mui/icons-material';
 import { useAppSelector } from '@/hooks/useRedux';
 import { formatCurrency, formatDate } from '@/utils/formatters';
 
@@ -26,7 +26,7 @@ export const AccountStatementPage: React.FC = () => {
     const transactions = useAppSelector(state => state.transactions.list);
     const [selectedAccount, setSelectedAccount] = useState('');
     const [fromDate, setFromDate] = useState('');
-    const [toDate, setTo Date] = useState('');
+    const [toDate, setToDate] = useState('');
     const [statementGenerated, setStatementGenerated] = useState(false);
 
     const handleGenerateStatement = () => {
@@ -37,10 +37,10 @@ export const AccountStatementPage: React.FC = () => {
         alert('Statement PDF would download here');
     };
 
-    const filteredTransactions = transactions.filter(txn => {
-        if (!statementGenerated || !selected Account) return false;
-    return txn.accountNumber === accounts.find(acc => acc.id === selectedAccount)?.number;
-});
+    const filteredTransactions = transactions.filter(() => {
+        if (!statementGenerated || !selectedAccount) return false;
+        return true;
+    });
 
 return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
@@ -135,19 +135,19 @@ return (
                             <TableBody>
                                 {filteredTransactions.length > 0 ? (
                                     filteredTransactions.map((txn, idx) => (
-                                        <TableRow key={txn.transactionId || idx}>
-                                            <TableCell>{formatDate(txn.createdAt)}</TableCell>
-                                            <TableCell>{txn.description}</TableCell>
+                                        <TableRow key={txn.id || idx}>
+                                            <TableCell>{formatDate(txn.date)}</TableCell>
+                                            <TableCell>{txn.desc || '-'}</TableCell>
                                             <TableCell>
                                                 <Chip label={txn.ref || 'N/A'} size="small" />
                                             </TableCell>
                                             <TableCell align="right" sx={{ color: 'error.main' }}>
-                                                {txn.type.toLowerCase().includes('debit') ? formatCurrency(Math.abs(txn.amount)) : '-'}
+                                                {txn.type === 'Debit' ? formatCurrency(Math.abs(txn.amount)) : '-'}
                                             </TableCell>
                                             <TableCell align="right" sx={{ color: 'success.main' }}>
-                                                {txn.type.toLowerCase().includes('credit') ? formatCurrency(txn.amount) : '-'}
+                                                {txn.type === 'Credit' ? formatCurrency(txn.amount) : '-'}
                                             </TableCell>
-                                            <TableCell align="right" fontWeight={600}>
+                                            <TableCell align="right" sx={{ fontWeight: 600 }}>
                                                 {formatCurrency(accounts.find(a => a.id === selectedAccount)?.balance || 0)}
                                             </TableCell>
                                         </TableRow>

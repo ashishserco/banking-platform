@@ -13,7 +13,7 @@ import {
     Stack,
     Divider
 } from '@mui/material';
-import { TrendingUp, AccountBalance, CalendarToday } from '@mui/icons-material';
+import { AccountBalance } from '@mui/icons-material';
 import { formatCurrency, formatDate } from '@/utils/formatters';
 
 export const LoansPage: React.FC = () => {
